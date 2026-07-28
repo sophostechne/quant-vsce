@@ -61,9 +61,12 @@ Prices in this mode are a seeded random walk and must not be traded on.
 
 ## Build
 
-Compilation is registered in `build/gulpfile.extensions.ts`. The extension has no install step
-of its own (it follows the `search-result` pattern), so a root `npm install` is all that is
-needed.
+The extension is registered in two places, and both are required:
+
+- `build/npm/dirs.ts` — so `npm install` provisions `@types/node` locally. The tsconfig pins
+  `typeRoots` to `./node_modules/@types`, which does not walk up to the repo root, so without
+  this entry the compile fails with `TS2688: Cannot find type definition file for 'node'`.
+- `build/gulpfile.extensions.ts` — so the tsconfig is compiled.
 
 ```sh
 npx gulp compile-extension:quant
