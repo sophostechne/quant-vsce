@@ -60,7 +60,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				timeframes: TIMEFRAMES,
 				// Real path: the webview opens this socket itself and reads binary frames.
 				dataPlaneUrl: this._client.dataPlaneUrl,
-				symbolId: this._client.simulator.symbolId(model.symbol),
+				symbolId: this._client.symbolId(model.symbol),
 				simulated: this._client.state === ConnectionState.Simulated
 			});
 		};
@@ -119,6 +119,8 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		}));
 
 		disposables.push(this._client.onDidChangeState(() => pushConfig()));
+		// The id arrives after the subscribe round-trip, so the chart has to be told again.
+		disposables.push(this._client.onDidChangeSymbolMap(() => pushConfig()));
 
 		// Development relay only. With a daemon present the webview reads ticks from its own
 		// socket and nothing here runs.
