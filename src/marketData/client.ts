@@ -47,6 +47,9 @@ export class MarketDataClient implements vscode.Disposable {
 	private _reconnectTimer: NodeJS.Timeout | undefined;
 	private _nextRequestId = 1;
 	private _disposed = false;
+	/** A socket attempt is in flight. Tracked separately from state, which stays Simulated across retries. */
+	private _connecting = false;
+	private _suppressAttemptLogs = false;
 
 	private readonly _subscriptions = new Set<string>();
 	private readonly _quotes = new Map<string, Quote>();
@@ -106,7 +109,7 @@ export class MarketDataClient implements vscode.Disposable {
 	}
 
 	connect(): void {
-		if (this._disposed || this._state === ConnectionState.Connecting || this._state === ConnectionState.Connected) {
+		if (this._disposed || this._connecting || this._state === ConnectionState.Connected) {
 			return;
 		}
 		this._clearReconnect();
@@ -123,13 +126,20 @@ export class MarketDataClient implements vscode.Disposable {
 		const port = config.get<number>('daemon.port', 8787);
 		const url = `ws://${host}:${port}`;
 
-		this._setState(ConnectionState.Connecting);
-		this._log.info(`Connecting to market data daemon at ${url}`);
+		this._connecting = true;
+		// While the simulator is driving, keep reporting Simulated across retry attempts.
+		// Flipping to Connecting every few seconds would make the status bar strobe and would
+		// briefly claim the synthetic prices on screen are real.
+		if (this._state !== ConnectionState.Simulated) {
+			this._setState(ConnectionState.Connecting);
+		}
+		this._logAttempt(`Connecting to market data daemon at ${url}`);
 
 		let socket: WebSocketLike;
 		try {
 			socket = new ctor(url);
 		} catch (error) {
+			this._connecting = false;
 			this._log.error('Failed to open control socket', error);
 			this._fallBackToSimulator();
 			return;
@@ -163,17 +173,21 @@ export class MarketDataClient implements vscode.Disposable {
 			}
 			this._socket = undefined;
 			this._dataPort = undefined;
+			this._connecting = false;
+			this._symbolIds.clear();
 			if (this._disposed) {
 				return;
 			}
-			if (this._state === ConnectionState.Connecting) {
-				this._log.warn('Daemon unreachable.');
-				this._fallBackToSimulator();
-			} else {
+			if (this._state === ConnectionState.Connected) {
 				this._log.warn('Control socket closed, reconnecting.');
 				this._setState(ConnectionState.Disconnected);
-				this._scheduleReconnect();
+			} else {
+				this._logAttempt('Daemon unreachable.');
 			}
+			// Always fall back and always keep retrying. The simulator is a stand-in for a
+			// daemon that is not there yet, never a terminal state - a daemon restart must not
+			// strand the session on synthetic prices until the editor is restarted.
+			this._fallBackToSimulator();
 		};
 	}
 
@@ -243,6 +257,12 @@ export class MarketDataClient implements vscode.Disposable {
 		switch (message.type) {
 			case 'hello':
 				this._dataPort = message.dataPort;
+				this._connecting = false;
+				this._suppressAttemptLogs = false;
+				// A live daemon supersedes the simulator; leaving it running would race real
+				// quotes against synthetic ones for the same symbols.
+				this._simulator.stop();
+				this._quotes.clear();
 				this._setState(ConnectionState.Connected);
 				this._log.info(`Connected. Data plane on port ${message.dataPort}, venues: ${message.venues.join(', ') || 'none'}`);
 				if (this._subscriptions.size > 0) {
@@ -301,11 +321,25 @@ export class MarketDataClient implements vscode.Disposable {
 			this._scheduleReconnect();
 			return;
 		}
-		this._log.warn('Falling back to the simulated feed. Prices are synthetic and must not be traded on.');
-		this._setState(ConnectionState.Simulated);
-		this._simulator.start();
+		if (this._state !== ConnectionState.Simulated) {
+			this._log.warn('Falling back to the simulated feed. Prices are synthetic and must not be traded on.');
+			this._setState(ConnectionState.Simulated);
+			this._simulator.start();
+		}
 		if (this._subscriptions.size > 0) {
 			this._simulator.subscribe([...this._subscriptions]);
+		}
+		this._scheduleReconnect();
+	}
+
+	/**
+	 * Reconnect attempts repeat forever, so log the first of a run and then go quiet. Otherwise
+	 * an overnight session with no daemon writes thousands of identical lines.
+	 */
+	private _logAttempt(message: string): void {
+		if (!this._suppressAttemptLogs) {
+			this._log.warn(message);
+			this._suppressAttemptLogs = true;
 		}
 	}
 
