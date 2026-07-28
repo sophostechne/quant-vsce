@@ -1,0 +1,182 @@
+{
+  "name": "quant",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "1.0.0",
+  "publisher": "vscode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.132.0"
+  },
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%capabilities.untrustedWorkspaces.description%"
+    }
+  },
+  "enabledApiProposals": [
+    "editorInsets"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "quant",
+          "icon": "$(graph)",
+          "title": "%container.title%"
+        }
+      ]
+    },
+    "views": {
+      "quant": [
+        {
+          "id": "quant.watchlist",
+          "name": "%view.watchlist.title%"
+        },
+        {
+          "id": "quant.strategies",
+          "name": "%view.strategies.title%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "quant.watchlist",
+        "contents": "%viewsWelcome.watchlist%"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "quant.chart",
+        "displayName": "%customEditor.chart.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.chart"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "languages": [
+      {
+        "id": "json",
+        "extensions": [
+          ".chart"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "quant.connect",
+        "title": "%cmd.connect%",
+        "category": "%cmd.category%"
+      },
+      {
+        "command": "quant.disconnect",
+        "title": "%cmd.disconnect%",
+        "category": "%cmd.category%"
+      },
+      {
+        "command": "quant.addSymbol",
+        "title": "%cmd.addSymbol%",
+        "category": "%cmd.category%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "quant.removeSymbol",
+        "title": "%cmd.removeSymbol%",
+        "category": "%cmd.category%",
+        "icon": "$(close)"
+      },
+      {
+        "command": "quant.openChart",
+        "title": "%cmd.openChart%",
+        "category": "%cmd.category%",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "quant.showLog",
+        "title": "%cmd.showLog%",
+        "category": "%cmd.category%"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "quant.addSymbol",
+          "when": "view == quant.watchlist",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "quant.openChart",
+          "when": "view == quant.watchlist && viewItem == quant.symbol",
+          "group": "inline@1"
+        },
+        {
+          "command": "quant.removeSymbol",
+          "when": "view == quant.watchlist && viewItem == quant.symbol",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "quant.removeSymbol",
+          "when": "never"
+        },
+        {
+          "command": "quant.openChart",
+          "when": "never"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "%config.title%",
+      "properties": {
+        "quant.daemon.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "%config.daemon.host%"
+        },
+        "quant.daemon.port": {
+          "type": "number",
+          "default": 8787,
+          "description": "%config.daemon.port%"
+        },
+        "quant.daemon.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.daemon.autoConnect%"
+        },
+        "quant.daemon.allowSimulatedFeed": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.daemon.allowSimulatedFeed%"
+        },
+        "quant.watchlist.refreshIntervalMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 50,
+          "maximum": 5000,
+          "description": "%config.watchlist.refreshIntervalMs%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "npx gulp compile-extension:quant",
+    "watch": "npx gulp watch-extension:quant"
+  },
+  "devDependencies": {
+    "@types/node": "24.x"
+  }
+}

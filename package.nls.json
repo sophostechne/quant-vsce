@@ -1,0 +1,23 @@
+{
+	"displayName": "Quant Workbench",
+	"description": "Market data, watchlists, charts and strategy tooling.",
+	"capabilities.untrustedWorkspaces.description": "Strategies execute code from the workspace and require trust.",
+	"container.title": "Quant",
+	"view.watchlist.title": "Watchlist",
+	"view.strategies.title": "Strategies",
+	"viewsWelcome.watchlist": "No symbols yet.\n[Add Symbol](command:quant.addSymbol)",
+	"customEditor.chart.displayName": "Chart",
+	"config.title": "Quant",
+	"config.daemon.host": "Host of the local market data daemon.",
+	"config.daemon.port": "Port of the local market data daemon.",
+	"config.daemon.autoConnect": "Connect to the market data daemon on startup.",
+	"config.daemon.allowSimulatedFeed": "When no daemon is reachable, drive the UI with a synthetic feed. Development only.",
+	"config.watchlist.refreshIntervalMs": "How often the watchlist tree coalesces and repaints price updates. Ticks arrive far faster than this; the tree is DOM-backed and must not repaint per tick.",
+	"cmd.category": "Quant",
+	"cmd.connect": "Connect to Market Data",
+	"cmd.disconnect": "Disconnect from Market Data",
+	"cmd.addSymbol": "Add Symbol",
+	"cmd.removeSymbol": "Remove Symbol",
+	"cmd.openChart": "Open Chart",
+	"cmd.showLog": "Show Log"
+}
