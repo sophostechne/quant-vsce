@@ -50,6 +50,8 @@ export class MarketDataClient implements vscode.Disposable {
 
 	private readonly _subscriptions = new Set<string>();
 	private readonly _quotes = new Map<string, Quote>();
+	/** Symbol -> interned id, as assigned by the daemon. Empty on the simulated feed. */
+	private readonly _symbolIds = new Map<string, number>();
 	private readonly _pendingHistory = new Map<number, { resolve(bars: readonly Bar[]): void; reject(error: Error): void }>();
 	private readonly _simulator: SimulatedFeed;
 
@@ -58,6 +60,9 @@ export class MarketDataClient implements vscode.Disposable {
 
 	private readonly _onDidChangeQuote = new vscode.EventEmitter<Quote>();
 	readonly onDidChangeQuote = this._onDidChangeQuote.event;
+
+	private readonly _onDidChangeSymbolMap = new vscode.EventEmitter<void>();
+	readonly onDidChangeSymbolMap = this._onDidChangeSymbolMap.event;
 
 	constructor(private readonly _log: Logger) {
 		this._simulator = new SimulatedFeed();
@@ -87,6 +92,17 @@ export class MarketDataClient implements vscode.Disposable {
 
 	get simulator(): SimulatedFeed {
 		return this._simulator;
+	}
+
+	/**
+	 * Interned id a chart must match against in binary tick frames. Comes from the daemon's
+	 * symbolMap when connected, and from the simulator otherwise - the two id spaces are
+	 * unrelated, so this must not be read off the simulator while a daemon is live.
+	 */
+	symbolId(symbol: string): number | undefined {
+		return this._state === ConnectionState.Simulated
+			? this._simulator.symbolId(symbol)
+			: this._symbolIds.get(symbol.toUpperCase());
 	}
 
 	connect(): void {
@@ -262,7 +278,13 @@ export class MarketDataClient implements vscode.Disposable {
 			}
 
 			case 'symbolMap':
-				// Ids are consumed by webviews reading binary frames; nothing to do here.
+				// Binary tick frames carry the interned id, not the symbol string, so a chart
+				// cannot match its instrument until this arrives.
+				this._symbolIds.clear();
+				for (const entry of message.entries) {
+					this._symbolIds.set(entry.symbol, entry.id);
+				}
+				this._onDidChangeSymbolMap.fire();
 				break;
 		}
 	}
@@ -331,5 +353,6 @@ export class MarketDataClient implements vscode.Disposable {
 		this._pendingHistory.clear();
 		this._onDidChangeState.dispose();
 		this._onDidChangeQuote.dispose();
+		this._onDidChangeSymbolMap.dispose();
 	}
 }
