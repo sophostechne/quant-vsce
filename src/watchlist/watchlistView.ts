@@ -7,7 +7,12 @@ import * as vscode from 'vscode';
 import { ConnectionState, MarketDataClient } from '../marketData/client';
 
 const STORAGE_KEY = 'quant.watchlist.symbols';
-const DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'SPY'];
+/**
+ * Crypto is included because the default daemon provider is Coinbase, which trades
+ * continuously - so a fresh profile shows real prices at any hour. The equities entries only
+ * resolve once an equities provider is configured, and read as "no data" until then.
+ */
+const DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'SPY', 'BTC-USD', 'ETH-USD'];
 
 export class SymbolNode {
 	constructor(readonly symbol: string) { }
