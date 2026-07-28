@@ -66,14 +66,24 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		};
 
 		const pushHistory = async () => {
+			// Provenance travels with the bars. The chart must be able to say where what it is
+			// drawing came from, which the transport alone cannot tell it - a healthy socket
+			// says nothing about whether these particular bars are real.
+			const source = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
 			try {
 				const bars = await this._client.history(model.symbol, model.timeframe, model.bars);
-				void webviewPanel.webview.postMessage({ type: 'history', symbol: model.symbol, bars });
+				void webviewPanel.webview.postMessage({ type: 'history', symbol: model.symbol, bars, source });
 			} catch (error) {
 				this._log.error(`History for ${model.symbol} failed`, error);
+				// Send an empty series so the chart discards whatever it was showing. Keeping
+				// stale bars on screen under a new label is how synthetic prices end up
+				// captioned as live.
 				void webviewPanel.webview.postMessage({
-					type: 'status',
-					message: error instanceof Error ? error.message : 'History request failed.'
+					type: 'history',
+					symbol: model.symbol,
+					bars: [],
+					source,
+					error: error instanceof Error ? error.message : 'History request failed.'
 				});
 			}
 		};
@@ -118,7 +128,13 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			await pushHistory();
 		}));
 
-		disposables.push(this._client.onDidChangeState(() => pushConfig()));
+		// A feed change invalidates the bars on screen, not just the config: bars fetched from
+		// the simulator are not the same instrument as bars from a live venue, even for the
+		// same symbol. Refetch rather than relabel.
+		disposables.push(this._client.onDidChangeState(() => {
+			pushConfig();
+			void pushHistory();
+		}));
 		// The id arrives after the subscribe round-trip, so the chart has to be told again.
 		disposables.push(this._client.onDidChangeSymbolMap(() => pushConfig()));
 

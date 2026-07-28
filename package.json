@@ -173,8 +173,9 @@
     }
   },
   "scripts": {
-    "compile": "npx gulp compile-extension:quant",
-    "watch": "npx gulp watch-extension:quant"
+    "compile": "npx gulp compile-extension:quant && npm run build-webview",
+    "watch": "npm run build-webview && npx gulp watch-extension:quant",
+    "build-webview": "node ./esbuild.webview.mts"
   },
   "devDependencies": {
     "@types/node": "24.x"
