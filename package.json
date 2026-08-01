@@ -106,6 +106,12 @@
         "command": "quant.showLog",
         "title": "%cmd.showLog%",
         "category": "%cmd.category%"
+      },
+      {
+        "command": "quant.runBacktest",
+        "title": "%cmd.runBacktest%",
+        "category": "%cmd.category%",
+        "icon": "$(play)"
       }
     ],
     "menus": {
@@ -126,6 +132,11 @@
           "command": "quant.removeSymbol",
           "when": "view == quant.watchlist && viewItem == quant.symbol",
           "group": "inline@2"
+        },
+        {
+          "command": "quant.runBacktest",
+          "when": "view == quant.strategies && viewItem == quant.strategy",
+          "group": "inline@1"
         }
       ],
       "commandPalette": [
@@ -136,6 +147,13 @@
         {
           "command": "quant.openChart",
           "when": "never"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "quant.runBacktest",
+          "when": "resourceExtname == .py && resourceDirname =~ /strategies/",
+          "group": "navigation@1"
         }
       ]
     },
@@ -168,6 +186,46 @@
           "minimum": 50,
           "maximum": 5000,
           "description": "%config.watchlist.refreshIntervalMs%"
+        },
+        "quant.nautilus.projectPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.nautilus.projectPath%"
+        },
+        "quant.nautilus.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.nautilus.pythonPath%"
+        },
+        "quant.backtest.product": {
+          "type": "string",
+          "default": "BTC-USD",
+          "description": "%config.backtest.product%"
+        },
+        "quant.backtest.timeframe": {
+          "type": "string",
+          "default": "1h",
+          "enum": [
+            "1m",
+            "5m",
+            "15m",
+            "1h",
+            "6h",
+            "1d"
+          ],
+          "description": "%config.backtest.timeframe%"
+        },
+        "quant.backtest.bars": {
+          "type": "number",
+          "default": 1200,
+          "minimum": 50,
+          "maximum": 10000,
+          "description": "%config.backtest.bars%"
+        },
+        "quant.backtest.params": {
+          "type": "object",
+          "default": {},
+          "description": "%config.backtest.params%"
         }
       }
     }

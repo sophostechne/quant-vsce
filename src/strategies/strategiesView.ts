@@ -7,6 +7,13 @@ import * as vscode from 'vscode';
 
 const STRATEGY_GLOB = '**/strategies/**/*.{py,ts,js}';
 
+/**
+ * Dependency trees contain `strategies` directories of their own - NautilusTrader ships two
+ * dozen example strategies under `site-packages` - and listing those alongside the user's own
+ * buries them.
+ */
+const STRATEGY_EXCLUDE = '{**/node_modules/**,**/.venv/**,**/venv/**,**/site-packages/**,**/.git/**,**/__pycache__/**}';
+
 export class StrategyNode {
 	constructor(readonly uri: vscode.Uri) { }
 }
@@ -45,7 +52,7 @@ export class StrategiesProvider implements vscode.TreeDataProvider<StrategyNode>
 		if (element) {
 			return [];
 		}
-		const files = await vscode.workspace.findFiles(STRATEGY_GLOB, '**/node_modules/**', 500);
+		const files = await vscode.workspace.findFiles(STRATEGY_GLOB, STRATEGY_EXCLUDE, 500);
 		return files
 			.sort((a, b) => a.fsPath.localeCompare(b.fsPath))
 			.map(uri => new StrategyNode(uri));

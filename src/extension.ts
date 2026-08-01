@@ -7,7 +7,8 @@ import * as vscode from 'vscode';
 import { CHART_VIEW_TYPE, ChartEditorProvider, defaultChartContent } from './chart/chartEditor';
 import { Logger } from './logger';
 import { ConnectionState, MarketDataClient } from './marketData/client';
-import { StrategiesProvider } from './strategies/strategiesView';
+import { BacktestRunner, formatResult } from './strategies/backtestRunner';
+import { StrategiesProvider, StrategyNode } from './strategies/strategiesView';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -59,6 +60,15 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 
+		vscode.commands.registerCommand('quant.runBacktest', async (node?: StrategyNode) => {
+			const strategyFile = node?.uri ?? vscode.window.activeTextEditor?.document.uri;
+			if (!strategyFile) {
+				void vscode.window.showWarningMessage(vscode.l10n.t('Open a strategy file, or run this from the Strategies view.'));
+				return;
+			}
+			await runBacktest(new BacktestRunner(log), log, strategyFile);
+		}),
+
 		vscode.commands.registerCommand('quant.openChart', async (node?: SymbolNode) => {
 			const symbol = node?.symbol ?? watchlist.symbols[0];
 			if (!symbol) {
@@ -75,6 +85,51 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
 	// Disposal is handled through `context.subscriptions`.
+}
+
+/**
+ * Runs one backtest, reporting progress in a cancellable notification and the outcome in the
+ * log. The numbers land in the output channel rather than a toast because a backtest result is
+ * something to read and compare, not to acknowledge and dismiss.
+ */
+async function runBacktest(runner: BacktestRunner, log: Logger, strategyFile: vscode.Uri): Promise<void> {
+	const config = vscode.workspace.getConfiguration('quant');
+	const name = strategyFile.path.split('/').pop() ?? 'strategy';
+
+	try {
+		const result = await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: vscode.l10n.t('Backtesting {0}', name),
+				cancellable: true,
+			},
+			(progress, token) => runner.run({
+				strategyFile,
+				product: config.get<string>('backtest.product', 'BTC-USD'),
+				timeframe: config.get<string>('backtest.timeframe', '1h'),
+				bars: config.get<number>('backtest.bars', 1200),
+				params: config.get<Record<string, unknown>>('backtest.params', {}),
+			}, token, progress),
+		);
+
+		log.info('\n' + formatResult(name, result));
+		log.show();
+
+		const pnl = result.realised_pnl;
+		void vscode.window.showInformationMessage(
+			pnl === undefined
+				? vscode.l10n.t('{0}: no positions taken over {1} bars.', name, String(result.bars))
+				: vscode.l10n.t('{0}: {1} USD over {2} positions.', name, pnl.toFixed(2), String(result.positions)),
+		);
+	} catch (error) {
+		if (error instanceof vscode.CancellationError) {
+			log.info('Backtest cancelled.');
+			return;
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		log.error(`Backtest failed: ${message}`);
+		void vscode.window.showErrorMessage(vscode.l10n.t('Backtest failed: {0}', message));
+	}
 }
 
 /**
