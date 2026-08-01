@@ -19,5 +19,12 @@
 	"cmd.addSymbol": "Add Symbol",
 	"cmd.removeSymbol": "Remove Symbol",
 	"cmd.openChart": "Open Chart",
-	"cmd.showLog": "Show Log"
+	"cmd.showLog": "Show Log",
+	"cmd.runBacktest": "Run Backtest",
+	"config.nautilus.projectPath": "Directory of the strategies project containing backtests/run_json.py. Defaults to the first workspace folder.",
+	"config.nautilus.pythonPath": "Python interpreter to run backtests with. Defaults to .venv/bin/python inside the project directory.",
+	"config.backtest.product": "Instrument to backtest against.",
+	"config.backtest.timeframe": "Bar timeframe for backtests.",
+	"config.backtest.bars": "Number of bars to fetch for a backtest.",
+	"config.backtest.params": "Extra strategy config values, merged into the strategy's config object."
 }
