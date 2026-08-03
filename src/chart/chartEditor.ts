@@ -54,6 +54,8 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				// Real path: the webview opens this socket itself and reads binary frames.
 				dataPlaneUrl: this._client.dataPlaneUrl,
 				symbolId: this._client.symbolId(model.symbol),
+				style: model.style,
+				styleOptions: model.styleOptions,
 				indicators: model.indicators,
 				simulated: this._client.state === ConnectionState.Simulated
 			});
@@ -120,7 +122,9 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			const timeframeChanged = next.timeframe !== model.timeframe;
 			const viewChanged =
 				JSON.stringify(next.indicators) !== JSON.stringify(model.indicators)
-				|| JSON.stringify(next.paneHeights) !== JSON.stringify(model.paneHeights);
+				|| JSON.stringify(next.paneHeights) !== JSON.stringify(model.paneHeights)
+				|| next.style !== model.style
+				|| JSON.stringify(next.styleOptions) !== JSON.stringify(model.styleOptions);
 			if (!symbolChanged && !timeframeChanged) {
 				if (viewChanged) {
 					// Indicators are derived from bars already loaded, so redraw without refetching.

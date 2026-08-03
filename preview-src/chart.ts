@@ -8,6 +8,7 @@ import {
 	TICK_RECORD_BYTES
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
+import { ChartStyle, StyleOptions, TRANSFORM_STYLES, drawPriceSeries, transformBars } from './chartTypes';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -22,7 +23,15 @@ const readoutLabel = document.getElementById('readout') as HTMLElement;
 const legendLabel = document.getElementById('legend') as HTMLElement;
 const context = canvas.getContext('2d')!;
 
+/** As received from the host. */
+let sourceBars: Bar[] = [];
+/**
+ * What is drawn and what indicators run on. Equal to `sourceBars` for per-bar styles; a
+ * different series entirely for Renko, Line Break, Range and Heikin Ashi.
+ */
 let bars: Bar[] = [];
+let chartStyle: ChartStyle = 'candles';
+let styleOptions: StyleOptions = {};
 let symbolId = -1;
 let lastPrice = 0;
 let previousClose = 0;
@@ -39,6 +48,25 @@ let dataPlaneHealthy = true;
 let indicatorSpecs: readonly IndicatorSpec[] = [];
 let indicatorSeries: IndicatorSeries[] = [];
 let indicatorsDirty = true;
+
+/**
+ * Re-derives the drawn series from the source bars. Runs whenever the style, its options or
+ * the data change - a transform that re-aggregates cannot be applied at paint time, because
+ * the bar count and therefore the whole viewport depend on it.
+ */
+function rebuildSeries(): void {
+	const previousLength = bars.length;
+	bars = transformBars(chartStyle, sourceBars, styleOptions);
+	indicatorsDirty = true;
+	// A transform changes how many bars exist, so a viewport measured in indices is no longer
+	// meaningful. Reset to the full range rather than framing an arbitrary window.
+	if (bars.length !== previousLength) {
+		viewSize = bars.length;
+		viewOffset = 0;
+		following = true;
+	}
+	clampView();
+}
 
 function rebuildIndicators(): void {
 	indicatorsDirty = false;
@@ -278,14 +306,32 @@ function formatTime(ms: number): string {
 function applyPrice(price: number): void {
 	// A tick for a series we could not load has nowhere to go. Showing it as a lone price
 	// beside an empty chart implies data we do not have.
-	const bar = bars[bars.length - 1];
-	if (!bar) {
+	const source = sourceBars[sourceBars.length - 1];
+	if (!source) {
 		return;
 	}
 	lastPrice = price;
-	bar.close = price;
-	bar.high = Math.max(bar.high, price);
-	bar.low = Math.min(bar.low, price);
+	source.close = price;
+	source.high = Math.max(source.high, price);
+	source.low = Math.min(source.low, price);
+	// Re-derive: on a Renko or Range chart a tick can complete a brick, which is a new bar
+	// rather than an edit to the last one.
+	if (TRANSFORM_STYLES.includes(chartStyle)) {
+		const wasFollowing = following;
+		bars = transformBars(chartStyle, sourceBars, styleOptions);
+		if (wasFollowing) {
+			viewSize = Math.min(viewSize || bars.length, bars.length);
+			following = true;
+		}
+		clampView();
+	} else {
+		const bar = bars[bars.length - 1];
+		if (bar) {
+			bar.close = price;
+			bar.high = Math.max(bar.high, price);
+			bar.low = Math.min(bar.low, price);
+		}
+	}
 	lastLabel.textContent = price.toFixed(2);
 	lastLabel.classList.toggle('up', price >= previousClose);
 	lastLabel.classList.toggle('down', price < previousClose);
@@ -480,7 +526,6 @@ function render(): void {
 	const price = panes[0]!;
 
 	const slot = plotWidth / visible.length;
-	const bodyWidth = Math.max(1, Math.min(slot * 0.7, 12));
 	// Below roughly a pixel per bar the wick and body collapse onto each other; draw a single
 	// hairline per bar instead of pretending there is a candle there.
 	const dense = slot < MIN_SLOT_PX;
@@ -491,26 +536,17 @@ function render(): void {
 		drawPaneAxis(pane, plotWidth, gridColor, textColor);
 	}
 
-	// Candles, in the price pane only.
-	for (let i = 0; i < visible.length; i++) {
-		const bar = visible[i]!;
-		const x = i * slot + slot / 2;
-		const color = bar.close >= bar.open ? upColor : downColor;
-
-		context.strokeStyle = color;
-		context.fillStyle = color;
-
-		context.beginPath();
-		context.moveTo(Math.round(x) + 0.5, price.toY(bar.high));
-		context.lineTo(Math.round(x) + 0.5, price.toY(bar.low));
-		context.stroke();
-
-		if (!dense) {
-			const openY = price.toY(bar.open);
-			const closeY = price.toY(bar.close);
-			context.fillRect(x - bodyWidth / 2, Math.min(openY, closeY), bodyWidth, Math.max(1, Math.abs(closeY - openY)));
-		}
-	}
+	// The price series, drawn in whatever style the document asks for.
+	drawPriceSeries(chartStyle, {
+		context,
+		visible,
+		slot,
+		plotWidth,
+		toY: price.toY,
+		palette: { up: upColor, down: downColor, text: textColor },
+		dense,
+		baseY: price.top + price.height,
+	}, styleOptions);
 
 	for (const pane of panes) {
 		drawPaneSeries(pane, visible, slot, upColor, downColor);
@@ -785,6 +821,14 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			}
 			paneFractions = [...(message.paneHeights ?? [])];
 
+			const nextStyle = (message.style ?? 'candles') as ChartStyle;
+			const nextOptions = message.styleOptions ?? {};
+			if (nextStyle !== chartStyle || JSON.stringify(nextOptions) !== JSON.stringify(styleOptions)) {
+				chartStyle = nextStyle;
+				styleOptions = nextOptions;
+				rebuildSeries();
+			}
+
 			timeframeSelect.replaceChildren();
 			for (const timeframe of message.timeframes) {
 				const option = document.createElement('option');
@@ -808,7 +852,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 		}
 
 		case 'history':
-			bars = message.bars.map(bar => ({ ...bar }));
+			sourceBars = message.bars.map(bar => ({ ...bar }));
+			bars = transformBars(chartStyle, sourceBars, styleOptions);
 			indicatorsDirty = true;
 			// A new series invalidates any zoom the user had; keeping an index range across a
 			// symbol or timeframe change would frame an arbitrary window of different data.
