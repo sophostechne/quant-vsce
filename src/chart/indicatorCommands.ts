@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { ChartStyle, IndicatorSpec, IndicatorType, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
+import { ChartStyle, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
 import { Logger } from '../logger';
 
 /** Numeric config keys a picker can prompt for. */
@@ -38,7 +38,30 @@ export function registerIndicatorCommands(log: Logger): vscode.Disposable {
 		vscode.commands.registerCommand('quant.addIndicator', () => addIndicator(log)),
 		vscode.commands.registerCommand('quant.removeIndicator', () => removeIndicator(log)),
 		vscode.commands.registerCommand('quant.setChartStyle', () => setChartStyle(log)),
+		vscode.commands.registerCommand('quant.setChartScale', () => setChartScale(log)),
 	);
+}
+
+async function setChartScale(log: Logger): Promise<void> {
+	const document = await activeChartDocument();
+	if (!document) {
+		return;
+	}
+	const model = parseModel(document, log);
+
+	const picked = await vscode.window.showQuickPick(
+		[
+			{ label: 'Linear', description: 'equal price distance', scale: 'linear' as PriceScale, picked: model.scale === 'linear' },
+			{ label: 'Logarithmic', description: 'equal percentage distance', scale: 'log' as PriceScale, picked: model.scale === 'log' },
+		],
+		{ title: vscode.l10n.t('Price Scale'), placeHolder: model.scale },
+	);
+	if (!picked || picked.scale === model.scale) {
+		return;
+	}
+
+	await writeModel(document, { ...model, scale: picked.scale });
+	log.info(`Price scale set to ${picked.scale} for ${document.uri.fsPath}`);
 }
 
 async function setChartStyle(log: Logger): Promise<void> {

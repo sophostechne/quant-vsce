@@ -29,5 +29,6 @@
 	"config.backtest.params": "Extra strategy config values, merged into the strategy's config object.",
 	"cmd.addIndicator": "Add Indicator",
 	"cmd.removeIndicator": "Remove Indicator",
-	"cmd.setChartStyle": "Chart Style"
+	"cmd.setChartStyle": "Chart Style",
+	"cmd.setChartScale": "Price Scale"
 }

@@ -31,6 +31,8 @@ let sourceBars: Bar[] = [];
  */
 let bars: Bar[] = [];
 let chartStyle: ChartStyle = 'candles';
+/** Applies to the price pane only; studies can be zero or negative. */
+let priceScale: 'linear' | 'log' = 'linear';
 let styleOptions: StyleOptions = {};
 let symbolId = -1;
 let lastPrice = 0;
@@ -393,7 +395,10 @@ interface Pane {
 	readonly max: number;
 	readonly series: readonly IndicatorSeries[];
 	readonly isPrice: boolean;
+	readonly log: boolean;
 	toY(value: number): number;
+	/** Inverse of `toY`. The crosshair and the axis both read values back from pixels. */
+	fromY(y: number): number;
 }
 
 /**
@@ -433,8 +438,20 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	if (!isFinite(min) || !isFinite(max) || max === min) {
 		return panes;
 	}
-	const pad = (max - min) * 0.05;
-	panes.push(makePane(PAD_TOP, priceHeight, min - pad, max + pad, overlays, true));
+	// Padding is multiplicative on a log scale: a fixed offset would be a large fraction of a
+	// low price and a negligible one of a high price.
+	const useLog = priceScale === 'log' && min > 0;
+	let paddedMin: number;
+	let paddedMax: number;
+	if (useLog) {
+		paddedMin = min / 1.02;
+		paddedMax = max * 1.02;
+	} else {
+		const pad = (max - min) * 0.05;
+		paddedMin = min - pad;
+		paddedMax = max + pad;
+	}
+	panes.push(makePane(PAD_TOP, priceHeight, paddedMin, paddedMax, overlays, true, useLog));
 
 	let top = PAD_TOP + priceHeight;
 	for (let i = 0; i < studies.length; i++) {
@@ -447,11 +464,29 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	return panes;
 }
 
-function makePane(top: number, height: number, min: number, max: number, series: readonly IndicatorSeries[], isPrice: boolean): Pane {
+function makePane(
+	top: number, height: number, min: number, max: number,
+	series: readonly IndicatorSeries[], isPrice: boolean, log = false,
+): Pane {
+	// Log needs strictly positive bounds. Rather than clamp and draw something subtly wrong,
+	// fall back to linear - a price series that reaches zero has no logarithmic scale.
+	if (log && min > 0 && max > 0) {
+		const lower = Math.log10(min);
+		const upper = Math.log10(max);
+		const span = upper - lower || 1;
+		return {
+			top, height, min, max, series, isPrice, log: true,
+			toY: (value: number) => value <= 0
+				? top + height
+				: top + (upper - Math.log10(value)) / span * height,
+			fromY: (y: number) => Math.pow(10, upper - ((y - top) / height) * span),
+		};
+	}
 	const span = max - min || 1;
 	return {
-		top, height, min, max, series, isPrice,
+		top, height, min, max, series, isPrice, log: false,
 		toY: (value: number) => top + (max - value) / span * height,
+		fromY: (y: number) => max - ((y - top) / height) * span,
 	};
 }
 
@@ -576,8 +611,10 @@ function drawPaneAxis(pane: Pane, plotWidth: number, gridColor: string, textColo
 
 	const steps = pane.isPrice ? 4 : 2;
 	for (let i = 0; i <= steps; i++) {
-		const value = pane.min + (pane.max - pane.min) * (i / steps);
-		const y = Math.round(pane.toY(value)) + 0.5;
+		// Gridlines are evenly spaced in pixels and their labels read back through the pane's
+		// own mapping, so a log pane gets logarithmically spaced values for free.
+		const y = Math.round(pane.top + pane.height * (1 - i / steps)) + 0.5;
+		const value = pane.fromY(y);
 		context.strokeStyle = gridColor;
 		context.globalAlpha = 0.4;
 		context.beginPath();
@@ -764,7 +801,7 @@ function drawCrosshair(
 	const y = Math.round(Math.max(PAD_TOP, Math.min(pointer.y, bottom))) + 0.5;
 
 	const pane = panes.find(p => y >= p.top && y <= p.top + p.height) ?? panes[0]!;
-	const value = pane.max - ((y - pane.top) / pane.height) * (pane.max - pane.min);
+	const value = pane.fromY(y);
 
 	context.strokeStyle = textColor;
 	context.globalAlpha = 0.7;
@@ -820,6 +857,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 				indicatorsDirty = true;
 			}
 			paneFractions = [...(message.paneHeights ?? [])];
+
+			priceScale = message.scale === 'log' ? 'log' : 'linear';
 
 			const nextStyle = (message.style ?? 'candles') as ChartStyle;
 			const nextOptions = message.styleOptions ?? {};

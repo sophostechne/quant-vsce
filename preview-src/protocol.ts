@@ -43,6 +43,7 @@ export interface ConfigMessage {
 	dataPlaneUrl?: string;
 	symbolId?: number;
 	style?: string;
+	scale?: 'linear' | 'log';
 	styleOptions?: { brickSize?: number; lineBreakCount?: number; baselineValue?: number };
 	indicators?: readonly IndicatorSpec[];
 	paneHeights?: readonly number[];
