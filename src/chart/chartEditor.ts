@@ -82,11 +82,19 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 		};
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[] }) => {
 			switch (message.type) {
 				case 'ready':
 					pushConfig();
 					await pushHistory();
+					break;
+
+				case 'setPaneHeights':
+					// Written on release rather than per mouse move, so a drag is one undo step
+					// and does not flood the document with intermediate states.
+					if (Array.isArray(message.paneHeights)) {
+						await writeModel(document, { ...model, paneHeights: message.paneHeights });
+					}
 					break;
 
 				case 'setSymbol':
@@ -110,10 +118,11 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			const next = parseModel(document, this._log);
 			const symbolChanged = next.symbol !== model.symbol;
 			const timeframeChanged = next.timeframe !== model.timeframe;
-			const indicatorsChanged =
-				JSON.stringify(next.indicators) !== JSON.stringify(model.indicators);
+			const viewChanged =
+				JSON.stringify(next.indicators) !== JSON.stringify(model.indicators)
+				|| JSON.stringify(next.paneHeights) !== JSON.stringify(model.paneHeights);
 			if (!symbolChanged && !timeframeChanged) {
-				if (indicatorsChanged) {
+				if (viewChanged) {
 					// Indicators are derived from bars already loaded, so redraw without refetching.
 					model = next;
 					pushConfig();

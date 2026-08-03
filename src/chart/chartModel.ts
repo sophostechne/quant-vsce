@@ -30,6 +30,11 @@ export interface ChartDocumentModel {
 	timeframe: Timeframe;
 	bars: number;
 	indicators: IndicatorSpec[];
+	/**
+	 * Fraction of the plot height taken by each study pane, in order. The price pane keeps the
+	 * remainder. Absent means "distribute evenly", which is what a chart starts as.
+	 */
+	paneHeights?: number[];
 }
 
 const DEFAULT_MODEL: ChartDocumentModel = { symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
@@ -75,6 +80,20 @@ function parseIndicators(value: unknown, log: Logger): IndicatorSpec[] {
 }
 
 
+/**
+ * Pane heights are fractions written back by dragging, so they are bounded rather than
+ * trusted: a stored zero or a NaN would collapse a pane with no way to drag it back.
+ */
+function parsePaneHeights(value: unknown): number[] | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const heights = value
+		.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry))
+		.map(entry => Math.min(Math.max(entry, 0.05), 0.8));
+	return heights.length > 0 ? heights : undefined;
+}
+
 /** Human-readable label for a spec, used in pickers and logs. */
 export function describeIndicator(spec: IndicatorSpec): string {
 	switch (spec.type) {
@@ -105,7 +124,8 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 			symbol: typeof parsed.symbol === 'string' && parsed.symbol.trim() ? parsed.symbol.trim().toUpperCase() : DEFAULT_MODEL.symbol,
 			timeframe,
 			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars,
-			indicators: parseIndicators(parsed.indicators, log)
+			indicators: parseIndicators(parsed.indicators, log),
+			paneHeights: parsePaneHeights(parsed.paneHeights)
 		};
 	} catch {
 		log.warn(`${document.uri.fsPath} is not valid JSON; using defaults.`);

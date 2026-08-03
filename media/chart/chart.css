@@ -27,6 +27,10 @@ body {
 	flex: 0 0 auto;
 	padding: 6px 10px;
 	border-bottom: 1px solid var(--vscode-panel-border);
+	/* Never wrap: the status badge says whether the data is real, and it must not be */
+	/* pushed onto a second row or off the edge by a long readout. */
+	flex-wrap: nowrap;
+	overflow: hidden;
 }
 
 .symbol,
@@ -42,6 +46,7 @@ body {
 
 .symbol {
 	width: 10ch;
+	flex: 0 0 auto;
 	text-transform: uppercase;
 }
 
@@ -68,6 +73,9 @@ body {
 	margin-left: auto;
 	color: var(--vscode-descriptionForeground);
 	font-size: 0.9em;
+	/* Pinned: everything else yields space before the badge does. */
+	flex: 0 0 auto;
+	white-space: nowrap;
 }
 
 .status.warn {
@@ -85,6 +93,9 @@ body {
 	font-variant-numeric: tabular-nums;
 	color: var(--vscode-descriptionForeground);
 	white-space: nowrap;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .readout.up {
@@ -111,9 +122,16 @@ body {
 	display: flex;
 	gap: 10px;
 	white-space: nowrap;
+	/* Truncates rather than pushing the badge away. */
+	min-width: 0;
+	overflow: hidden;
 }
 
 .legend-item {
 	font-variant-numeric: tabular-nums;
 	font-size: 0.9em;
+}
+
+#canvas.resizing {
+	cursor: row-resize;
 }
