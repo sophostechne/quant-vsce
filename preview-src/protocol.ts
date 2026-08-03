@@ -25,6 +25,13 @@ export interface Bar {
 /** Where the bars currently on screen came from. */
 export type BarSource = 'live' | 'simulated';
 
+export interface IndicatorSpec {
+	type: 'sma' | 'ema' | 'bbands' | 'vwap';
+	period?: number;
+	stddev?: number;
+	color?: string;
+}
+
 export interface ConfigMessage {
 	type: 'config';
 	symbol: string;
@@ -32,6 +39,7 @@ export interface ConfigMessage {
 	timeframes: readonly string[];
 	dataPlaneUrl?: string;
 	symbolId?: number;
+	indicators?: readonly IndicatorSpec[];
 	simulated: boolean;
 }
 

@@ -4,8 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-	Bar, BarSource, FRAME_HEADER_BYTES, FRAME_TYPE_TICK, HostMessage, TICK_RECORD_BYTES
+	Bar, BarSource, FRAME_HEADER_BYTES, FRAME_TYPE_TICK, HostMessage, IndicatorSpec,
+	TICK_RECORD_BYTES
 } from './protocol';
+import { IndicatorSeries, computeIndicator } from './indicators';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -17,6 +19,7 @@ const lastLabel = document.getElementById('last') as HTMLElement;
 const statusLabel = document.getElementById('status') as HTMLElement;
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const readoutLabel = document.getElementById('readout') as HTMLElement;
+const legendLabel = document.getElementById('legend') as HTMLElement;
 const context = canvas.getContext('2d')!;
 
 let bars: Bar[] = [];
@@ -31,6 +34,32 @@ let repaintQueued = false;
 let barsSource: BarSource | undefined;
 let barsError: string | undefined;
 let dataPlaneHealthy = true;
+
+// Indicators are recomputed only when the bars or the specs change, never per frame.
+let indicatorSpecs: readonly IndicatorSpec[] = [];
+let indicatorSeries: IndicatorSeries[] = [];
+let indicatorsDirty = true;
+
+function rebuildIndicators(): void {
+	indicatorsDirty = false;
+	indicatorSeries = bars.length === 0
+		? []
+		: indicatorSpecs
+			.map((spec, index) => computeIndicator(spec, bars, index))
+			.filter((series): series is IndicatorSeries => series !== undefined);
+	renderLegend();
+}
+
+function renderLegend(): void {
+	legendLabel.replaceChildren();
+	for (const series of indicatorSeries) {
+		const chip = document.createElement('span');
+		chip.className = 'legend-item';
+		chip.textContent = series.label;
+		chip.style.color = `var(--vscode-${series.color.replace('.', '-')})`;
+		legendLabel.appendChild(chip);
+	}
+}
 
 // -- Viewport --------------------------------------------------------------------------
 // The visible window, as an index range into `bars`. Panning and zooming move this rather
@@ -157,6 +186,8 @@ function applyPrice(price: number): void {
 	lastLabel.textContent = price.toFixed(2);
 	lastLabel.classList.toggle('up', price >= previousClose);
 	lastLabel.classList.toggle('down', price < previousClose);
+	// The live bar's close moved, so trailing averages ending on it are stale.
+	indicatorsDirty = true;
 	requestRepaint();
 }
 
@@ -300,6 +331,11 @@ function render(): void {
 		}
 	}
 
+	if (indicatorsDirty) {
+		rebuildIndicators();
+	}
+	drawIndicators(slot, toY);
+
 	drawTimeAxis(visible, slot, plotWidth, height, gridColor, textColor);
 
 	// Last price marker.
@@ -315,6 +351,64 @@ function render(): void {
 	}
 
 	drawCrosshair(visible, slot, plotWidth, plotHeight, height, min, max, textColor);
+}
+
+/**
+ * Overlay lines on the price scale. Values are index-aligned with the full series, so the
+ * viewport is applied by offsetting the read rather than by recomputing over the slice - an
+ * average recomputed per viewport would change as you scroll.
+ */
+function drawIndicators(slot: number, toY: (price: number) => number): void {
+	const styles = getComputedStyle(document.body);
+
+	for (const series of indicatorSeries) {
+		const color = styles.getPropertyValue(`--vscode-${series.color.replace('.', '-')}`).trim()
+			|| styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
+
+		// Bollinger-style bands shade between their first and last line.
+		if (series.fill && series.lines.length >= 2) {
+			const upper = series.lines[0]!;
+			const lower = series.lines[series.lines.length - 1]!;
+			context.fillStyle = color;
+			context.globalAlpha = 0.08;
+			context.beginPath();
+			let started = false;
+			for (let i = 0; i < viewSize; i++) {
+				const value = upper[viewOffset + i];
+				if (value === undefined) { continue; }
+				const x = i * slot + slot / 2;
+				if (started) { context.lineTo(x, toY(value)); } else { context.moveTo(x, toY(value)); started = true; }
+			}
+			for (let i = viewSize - 1; i >= 0; i--) {
+				const value = lower[viewOffset + i];
+				if (value === undefined) { continue; }
+				context.lineTo(i * slot + slot / 2, toY(value));
+			}
+			if (started) { context.closePath(); context.fill(); }
+			context.globalAlpha = 1;
+		}
+
+		context.strokeStyle = color;
+		context.lineWidth = 1.25;
+		for (const line of series.lines) {
+			context.beginPath();
+			let started = false;
+			for (let i = 0; i < viewSize; i++) {
+				const value = line[viewOffset + i];
+				if (value === undefined) {
+					// A gap in the series is a genuine gap - break the path rather than
+					// interpolating across bars where the indicator was not defined.
+					started = false;
+					continue;
+				}
+				const x = i * slot + slot / 2;
+				const y = toY(value);
+				if (started) { context.lineTo(x, y); } else { context.moveTo(x, y); started = true; }
+			}
+			context.stroke();
+		}
+		context.lineWidth = 1;
+	}
 }
 
 /** Time labels along the bottom, spaced so they never collide regardless of zoom. */
@@ -418,6 +512,11 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			symbolInput.value = message.symbol;
 			symbolId = typeof message.symbolId === 'number' ? message.symbolId : -1;
 
+			if (JSON.stringify(message.indicators ?? []) !== JSON.stringify(indicatorSpecs)) {
+				indicatorSpecs = message.indicators ?? [];
+				indicatorsDirty = true;
+			}
+
 			timeframeSelect.replaceChildren();
 			for (const timeframe of message.timeframes) {
 				const option = document.createElement('option');
@@ -442,6 +541,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 
 		case 'history':
 			bars = message.bars.map(bar => ({ ...bar }));
+			indicatorsDirty = true;
 			// A new series invalidates any zoom the user had; keeping an index range across a
 			// symbol or timeframe change would frame an arbitrary window of different data.
 			viewSize = bars.length;

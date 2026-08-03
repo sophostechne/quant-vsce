@@ -10,13 +10,59 @@ import { Bar, TIMEFRAMES, Tick, Timeframe } from '../protocol';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
 
+/** Overlay indicators drawn on the price scale. Oscillators would need their own pane. */
+const INDICATOR_TYPES = ['sma', 'ema', 'bbands', 'vwap'] as const;
+type IndicatorType = typeof INDICATOR_TYPES[number];
+
+interface IndicatorSpec {
+	type: IndicatorType;
+	period?: number;
+	stddev?: number;
+	color?: string;
+}
+
 interface ChartDocumentModel {
 	symbol: string;
 	timeframe: Timeframe;
 	bars: number;
+	indicators: IndicatorSpec[];
 }
 
-const DEFAULT_MODEL: ChartDocumentModel = { symbol: 'AAPL', timeframe: '1m', bars: 240 };
+const DEFAULT_MODEL: ChartDocumentModel = { symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
+
+/**
+ * Indicators come from the document, so a malformed entry is user input rather than a bug.
+ * Unknown types are dropped rather than rejecting the whole file - one bad line should not
+ * blank the chart.
+ */
+function parseIndicators(value: unknown, log: Logger): IndicatorSpec[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const parsed: IndicatorSpec[] = [];
+	for (const entry of value) {
+		if (typeof entry !== 'object' || entry === null) {
+			continue;
+		}
+		const candidate = entry as Partial<IndicatorSpec>;
+		if (!INDICATOR_TYPES.includes(candidate.type as IndicatorType)) {
+			log.warn(`Ignoring unknown indicator type: ${JSON.stringify(candidate.type)}`);
+			continue;
+		}
+		const spec: IndicatorSpec = { type: candidate.type as IndicatorType };
+		if (typeof candidate.period === 'number' && candidate.period >= 2) {
+			spec.period = Math.min(Math.floor(candidate.period), 1000);
+		}
+		if (typeof candidate.stddev === 'number' && candidate.stddev > 0) {
+			spec.stddev = Math.min(candidate.stddev, 10);
+		}
+		if (typeof candidate.color === 'string') {
+			spec.color = candidate.color;
+		}
+		parsed.push(spec);
+	}
+	return parsed;
+}
 
 /**
  * Charts are `.chart` files - JSON describing the symbol and timeframe - opened through a
@@ -61,6 +107,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				// Real path: the webview opens this socket itself and reads binary frames.
 				dataPlaneUrl: this._client.dataPlaneUrl,
 				symbolId: this._client.symbolId(model.symbol),
+				indicators: model.indicators,
 				simulated: this._client.state === ConnectionState.Simulated
 			});
 		};
@@ -116,7 +163,14 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			const next = parseModel(document, this._log);
 			const symbolChanged = next.symbol !== model.symbol;
 			const timeframeChanged = next.timeframe !== model.timeframe;
+			const indicatorsChanged =
+				JSON.stringify(next.indicators) !== JSON.stringify(model.indicators);
 			if (!symbolChanged && !timeframeChanged) {
+				if (indicatorsChanged) {
+					// Indicators are derived from bars already loaded, so redraw without refetching.
+					model = next;
+					pushConfig();
+				}
 				return;
 			}
 			if (symbolChanged) {
@@ -197,6 +251,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		<select id="timeframe" class="timeframe"></select>
 		<span id="last" class="last"></span>
 		<span id="readout" class="readout"></span>
+		<span id="legend" class="legend"></span>
 		<span id="status" class="status"></span>
 	</header>
 	<canvas id="canvas"></canvas>
@@ -219,7 +274,8 @@ function parseModel(document: vscode.TextDocument, log: Logger): ChartDocumentMo
 		return {
 			symbol: typeof parsed.symbol === 'string' && parsed.symbol.trim() ? parsed.symbol.trim().toUpperCase() : DEFAULT_MODEL.symbol,
 			timeframe,
-			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars
+			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars,
+			indicators: parseIndicators(parsed.indicators, log)
 		};
 	} catch {
 		log.warn(`${document.uri.fsPath} is not valid JSON; using defaults.`);
