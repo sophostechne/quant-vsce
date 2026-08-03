@@ -55,6 +55,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				dataPlaneUrl: this._client.dataPlaneUrl,
 				symbolId: this._client.symbolId(model.symbol),
 				style: model.style,
+				scale: model.scale,
 				styleOptions: model.styleOptions,
 				indicators: model.indicators,
 				simulated: this._client.state === ConnectionState.Simulated
@@ -124,6 +125,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				JSON.stringify(next.indicators) !== JSON.stringify(model.indicators)
 				|| JSON.stringify(next.paneHeights) !== JSON.stringify(model.paneHeights)
 				|| next.style !== model.style
+				|| next.scale !== model.scale
 				|| JSON.stringify(next.styleOptions) !== JSON.stringify(model.styleOptions);
 			if (!symbolChanged && !timeframeChanged) {
 				if (viewChanged) {

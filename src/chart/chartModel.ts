@@ -39,8 +39,12 @@ export interface StyleOptions {
 	baselineValue?: number;
 }
 
+export type PriceScale = 'linear' | 'log';
+
 export interface ChartDocumentModel {
 	style: ChartStyle;
+	/** Price pane only. Study panes stay linear, since they can be zero or negative. */
+	scale: PriceScale;
 	styleOptions?: StyleOptions;
 	symbol: string;
 	timeframe: Timeframe;
@@ -53,7 +57,7 @@ export interface ChartDocumentModel {
 	paneHeights?: number[];
 }
 
-const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
+const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
 
 /**
  * Indicators come from the document, so a malformed entry is user input rather than a bug.
@@ -176,6 +180,7 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 			: DEFAULT_MODEL.timeframe;
 		return {
 			style: CHART_STYLES.includes(parsed.style as ChartStyle) ? parsed.style as ChartStyle : DEFAULT_MODEL.style,
+			scale: parsed.scale === 'log' ? 'log' : 'linear',
 			styleOptions: parseStyleOptions(parsed.styleOptions),
 			symbol: typeof parsed.symbol === 'string' && parsed.symbol.trim() ? parsed.symbol.trim().toUpperCase() : DEFAULT_MODEL.symbol,
 			timeframe,

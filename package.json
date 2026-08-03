@@ -130,6 +130,12 @@
         "title": "%cmd.setChartStyle%",
         "category": "%cmd.category%",
         "icon": "$(symbol-color)"
+      },
+      {
+        "command": "quant.setChartScale",
+        "title": "%cmd.setChartScale%",
+        "category": "%cmd.category%",
+        "icon": "$(graph-scatter)"
       }
     ],
     "menus": {
@@ -179,6 +185,11 @@
           "command": "quant.setChartStyle",
           "when": "activeCustomEditorId == quant.chart",
           "group": "navigation@0"
+        },
+        {
+          "command": "quant.setChartScale",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "navigation@1"
         },
         {
           "command": "quant.addIndicator",
