@@ -41,6 +41,16 @@ export interface StyleOptions {
 
 export type PriceScale = 'linear' | 'log';
 
+const DRAWING_TOOLS = ['trendline', 'ray', 'horizontal', 'vertical', 'rectangle', 'fib'] as const;
+export type DrawingTool = typeof DRAWING_TOOLS[number];
+
+export interface DrawingPoint { time: number; price: number }
+export interface Drawing {
+	tool: DrawingTool;
+	points: DrawingPoint[];
+	color?: string;
+}
+
 export interface ChartDocumentModel {
 	style: ChartStyle;
 	/** Price pane only. Study panes stay linear, since they can be zero or negative. */
@@ -50,6 +60,7 @@ export interface ChartDocumentModel {
 	timeframe: Timeframe;
 	bars: number;
 	indicators: IndicatorSpec[];
+	drawings: Drawing[];
 	/**
 	 * Fraction of the plot height taken by each study pane, in order. The price pane keeps the
 	 * remainder. Absent means "distribute evenly", which is what a chart starts as.
@@ -57,7 +68,7 @@ export interface ChartDocumentModel {
 	paneHeights?: number[];
 }
 
-const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
+const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [], drawings: [] };
 
 /**
  * Indicators come from the document, so a malformed entry is user input rather than a bug.
@@ -99,6 +110,51 @@ function parseIndicators(value: unknown, log: Logger): IndicatorSpec[] {
 	return parsed;
 }
 
+
+/**
+ * Drawings are written back by the chart and can also be hand-edited, so anchors are checked
+ * for being finite numbers - a NaN would project to a pixel position that silently vanishes.
+ */
+function parseDrawings(value: unknown): Drawing[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const out: Drawing[] = [];
+	for (const entry of value) {
+		if (typeof entry !== 'object' || entry === null) {
+			continue;
+		}
+		const candidate = entry as Partial<Drawing>;
+		if (!DRAWING_TOOLS.includes(candidate.tool as DrawingTool) || !Array.isArray(candidate.points)) {
+			continue;
+		}
+		const points = candidate.points
+			.filter((point): point is DrawingPoint =>
+				typeof point === 'object' && point !== null
+				&& Number.isFinite((point as DrawingPoint).time)
+				&& Number.isFinite((point as DrawingPoint).price))
+			.slice(0, 2);
+		if (points.length === 0) {
+			continue;
+		}
+		const drawing: Drawing = { tool: candidate.tool as DrawingTool, points };
+		if (typeof candidate.color === 'string') {
+			drawing.color = candidate.color;
+		}
+		out.push(drawing);
+	}
+	return out.slice(0, 500);
+}
+
+/** Labels for the drawing-tool picker. */
+export const DRAWING_LABELS: readonly { tool: DrawingTool; label: string; description: string }[] = [
+	{ tool: 'trendline', label: 'Trend Line', description: 'drag between two points' },
+	{ tool: 'ray', label: 'Ray', description: 'extends past the second point' },
+	{ tool: 'horizontal', label: 'Horizontal Line', description: 'click a price level' },
+	{ tool: 'vertical', label: 'Vertical Line', description: 'click a time' },
+	{ tool: 'rectangle', label: 'Rectangle', description: 'drag a box' },
+	{ tool: 'fib', label: 'Fibonacci Retracement', description: 'drag across a swing' },
+];
 
 /** Style options come from a user-editable file, so they are bounded on read. */
 function parseStyleOptions(value: unknown): StyleOptions | undefined {
@@ -186,6 +242,7 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 			timeframe,
 			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars,
 			indicators: parseIndicators(parsed.indicators, log),
+			drawings: parseDrawings(parsed.drawings),
 			paneHeights: parsePaneHeights(parsed.paneHeights)
 		};
 	} catch {

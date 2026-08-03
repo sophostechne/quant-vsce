@@ -46,6 +46,7 @@ export interface ConfigMessage {
 	scale?: 'linear' | 'log';
 	styleOptions?: { brickSize?: number; lineBreakCount?: number; baselineValue?: number };
 	indicators?: readonly IndicatorSpec[];
+	drawings?: readonly { tool: string; points: { time: number; price: number }[]; color?: string }[];
 	paneHeights?: readonly number[];
 	simulated: boolean;
 }
@@ -68,4 +69,10 @@ export interface StatusMessage {
 	message: string;
 }
 
-export type HostMessage = ConfigMessage | HistoryMessage | TicksMessage | StatusMessage;
+export interface ArmToolMessage {
+	type: 'armTool';
+	/** Undefined disarms, returning the chart to panning. */
+	tool?: string;
+}
+
+export type HostMessage = ConfigMessage | HistoryMessage | TicksMessage | StatusMessage | ArmToolMessage;

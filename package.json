@@ -136,6 +136,18 @@
         "title": "%cmd.setChartScale%",
         "category": "%cmd.category%",
         "icon": "$(graph-scatter)"
+      },
+      {
+        "command": "quant.draw",
+        "title": "%cmd.draw%",
+        "category": "%cmd.category%",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "quant.clearDrawings",
+        "title": "%cmd.clearDrawings%",
+        "category": "%cmd.category%",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -192,6 +204,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "quant.draw",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "navigation@2"
+        },
+        {
           "command": "quant.addIndicator",
           "when": "activeCustomEditorId == quant.chart",
           "group": "navigation@1"
@@ -200,6 +217,11 @@
           "command": "quant.removeIndicator",
           "when": "activeCustomEditorId == quant.chart",
           "group": "navigation@2"
+        },
+        {
+          "command": "quant.clearDrawings",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "1_quant@1"
         }
       ]
     },

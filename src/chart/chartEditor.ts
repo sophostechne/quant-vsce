@@ -7,9 +7,26 @@ import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { ConnectionState, MarketDataClient } from '../marketData/client';
 import { Bar, TIMEFRAMES, Tick, Timeframe } from '../protocol';
-import { ChartDocumentModel, parseModel, writeModel } from './chartModel';
+import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
+
+/**
+ * Live chart panels by document URI, so commands can reach the webview of the chart the user
+ * is looking at. Kept here rather than in the command module because the provider is what
+ * knows when a panel appears and disappears.
+ */
+const activePanels = new Map<string, vscode.WebviewPanel>();
+
+/** Posts to the chart for `uri`, if one is open. */
+export function postToChart(uri: vscode.Uri, message: unknown): boolean {
+	const panel = activePanels.get(uri.toString());
+	if (!panel) {
+		return false;
+	}
+	void panel.webview.postMessage(message);
+	return true;
+}
 
 /**
  * Charts are `.chart` files - JSON describing the symbol and timeframe - opened through a
@@ -45,6 +62,8 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		const disposables: vscode.Disposable[] = [];
 		let model = parseModel(document, this._log);
 
+		activePanels.set(document.uri.toString(), webviewPanel);
+
 		const pushConfig = () => {
 			void webviewPanel.webview.postMessage({
 				type: 'config',
@@ -58,6 +77,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				scale: model.scale,
 				styleOptions: model.styleOptions,
 				indicators: model.indicators,
+				drawings: model.drawings,
 				simulated: this._client.state === ConnectionState.Simulated
 			});
 		};
@@ -85,11 +105,17 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 		};
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[] }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[]; drawings?: Drawing[] }) => {
 			switch (message.type) {
 				case 'ready':
 					pushConfig();
 					await pushHistory();
+					break;
+
+				case 'setDrawings':
+					if (Array.isArray(message.drawings)) {
+						await writeModel(document, { ...model, drawings: message.drawings });
+					}
 					break;
 
 				case 'setPaneHeights':
@@ -126,6 +152,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				|| JSON.stringify(next.paneHeights) !== JSON.stringify(model.paneHeights)
 				|| next.style !== model.style
 				|| next.scale !== model.scale
+				|| JSON.stringify(next.drawings) !== JSON.stringify(model.drawings)
 				|| JSON.stringify(next.styleOptions) !== JSON.stringify(model.styleOptions);
 			if (!symbolChanged && !timeframeChanged) {
 				if (viewChanged) {
@@ -173,6 +200,11 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		this._client.subscribe([model.symbol]);
 
 		webviewPanel.onDidDispose(() => {
+			// Only clear the entry if it is still this panel: the same document can be opened
+			// again in another group before this one is disposed.
+			if (activePanels.get(document.uri.toString()) === webviewPanel) {
+				activePanels.delete(document.uri.toString());
+			}
 			for (const disposable of disposables) {
 				disposable.dispose();
 			}
