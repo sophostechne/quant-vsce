@@ -43,6 +43,7 @@ export interface ConfigMessage {
 	dataPlaneUrl?: string;
 	symbolId?: number;
 	indicators?: readonly IndicatorSpec[];
+	paneHeights?: readonly number[];
 	simulated: boolean;
 }
 

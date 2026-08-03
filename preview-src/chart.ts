@@ -88,6 +88,43 @@ interface Pointer { x: number; y: number }
 let pointer: Pointer | undefined;
 let dragOrigin: { x: number; offset: number } | undefined;
 
+// -- Pane sizing -----------------------------------------------------------------------
+// Fraction of the plot height per study pane; the price pane keeps the remainder. Empty
+// means "even split", which is what an unconfigured chart uses.
+
+const MIN_STUDY_FRACTION = 0.06;
+const MIN_PRICE_FRACTION = 0.20;
+/** Pixels either side of a boundary that count as grabbing it. */
+const DIVIDER_HIT_PX = 6;
+
+let paneFractions: number[] = [];
+/** Boundaries from the last paint, so hit-testing matches what is on screen. */
+let dividerYs: number[] = [];
+let dividerDrag: { index: number; startY: number; before: number[] } | undefined;
+
+/** Even split when unset, and always the right length for the current study count. */
+function resolvedFractions(studyCount: number): number[] {
+	if (studyCount === 0) {
+		return [];
+	}
+	const fallback = Math.min(0.18, 0.55 / studyCount);
+	const out: number[] = [];
+	for (let i = 0; i < studyCount; i++) {
+		const value = paneFractions[i];
+		out.push(value !== undefined && value > 0 ? value : fallback);
+	}
+	// Studies must never crowd the candles out entirely.
+	const total = out.reduce((sum, value) => sum + value, 0);
+	const ceiling = 1 - MIN_PRICE_FRACTION;
+	if (total > ceiling) {
+		const scale = ceiling / total;
+		for (let i = 0; i < out.length; i++) {
+			out[i] = out[i]! * scale;
+		}
+	}
+	return out;
+}
+
 const PAD_TOP = 12;
 const PAD_BOTTOM = 22;
 const PAD_RIGHT = 64;
@@ -103,6 +140,55 @@ function clampView(): void {
 	if (following) {
 		viewOffset = bars.length - viewSize;
 	}
+}
+
+/** Index of the divider under a y coordinate, or undefined when not on one. */
+function dividerAt(y: number): number | undefined {
+	for (let i = 0; i < dividerYs.length; i++) {
+		if (Math.abs(y - dividerYs[i]!) <= DIVIDER_HIT_PX) {
+			return i;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Moves divider `index` by `dy` pixels. The pane above it grows and the study below shrinks;
+ * for the topmost divider the pane above is the price pane, which simply absorbs whatever the
+ * studies do not take.
+ */
+function dragDivider(index: number, dy: number, plotHeight: number, before: readonly number[]): void {
+	if (plotHeight <= 0) {
+		return;
+	}
+	const delta = dy / plotHeight;
+	const next = [...before];
+
+	const below = next[index];
+	if (below === undefined) {
+		return;
+	}
+	const shrunk = below - delta;
+	if (shrunk < MIN_STUDY_FRACTION) {
+		return;
+	}
+
+	if (index > 0) {
+		const above = next[index - 1]!;
+		const grown = above + delta;
+		if (grown < MIN_STUDY_FRACTION) {
+			return;
+		}
+		next[index - 1] = grown;
+	} else {
+		// Price pane absorbs the change; refuse if it would fall below its floor.
+		const studiesTotal = next.reduce((sum, value) => sum + value, 0) - below + shrunk;
+		if (1 - studiesTotal < MIN_PRICE_FRACTION) {
+			return;
+		}
+	}
+	next[index] = shrunk;
+	paneFractions = next;
 }
 
 /** Index of the bar under an x coordinate, or undefined when outside the plot. */
@@ -272,11 +358,12 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	const studies = indicatorSeries.filter(series => !series.overlay);
 	const overlays = indicatorSeries.filter(series => series.overlay);
 
-	const studyShare = Math.min(0.18 * studies.length, 0.55);
-	const studyHeight = studies.length > 0 ? (plotHeight * studyShare) / studies.length : 0;
-	const priceHeight = plotHeight - studyHeight * studies.length;
+	const fractions = resolvedFractions(studies.length);
+	const studyHeights = fractions.map(fraction => plotHeight * fraction);
+	const priceHeight = plotHeight - studyHeights.reduce((sum, value) => sum + value, 0);
 
 	const panes: Pane[] = [];
+	dividerYs = [];
 
 	// Price pane: scaled to the visible candles and any overlay running through them, so a
 	// band that pushes outside the price range is not clipped.
@@ -304,10 +391,12 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	panes.push(makePane(PAD_TOP, priceHeight, min - pad, max + pad, overlays, true));
 
 	let top = PAD_TOP + priceHeight;
-	for (const series of studies) {
+	for (let i = 0; i < studies.length; i++) {
+		const series = studies[i]!;
 		const bounds = series.range ?? visibleBounds(series);
-		panes.push(makePane(top, studyHeight, bounds.min, bounds.max, [series], false));
-		top += studyHeight;
+		dividerYs.push(top);
+		panes.push(makePane(top, studyHeights[i]!, bounds.min, bounds.max, [series], false));
+		top += studyHeights[i]!;
 	}
 	return panes;
 }
@@ -694,6 +783,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 				indicatorSpecs = message.indicators ?? [];
 				indicatorsDirty = true;
 			}
+			paneFractions = [...(message.paneHeights ?? [])];
 
 			timeframeSelect.replaceChildren();
 			for (const timeframe of message.timeframes) {
@@ -792,17 +882,42 @@ canvas.addEventListener('wheel', event => {
 }, { passive: false });
 
 canvas.addEventListener('mousedown', event => {
+	const divider = dividerAt(event.offsetY);
+	if (divider !== undefined) {
+		// Grabbing a boundary resizes; it must not also scroll the series sideways.
+		dividerDrag = {
+			index: divider,
+			startY: event.offsetY,
+			before: resolvedFractions(indicatorSeries.filter(series => !series.overlay).length),
+		};
+		return;
+	}
 	dragOrigin = { x: event.offsetX, offset: viewOffset };
 	canvas.classList.add('dragging');
 });
 
 window.addEventListener('mouseup', () => {
+	if (dividerDrag) {
+		dividerDrag = undefined;
+		// Persist on release, so a drag is a single undo step rather than hundreds.
+		vscode.postMessage({ type: 'setPaneHeights', paneHeights: paneFractions });
+	}
 	dragOrigin = undefined;
 	canvas.classList.remove('dragging');
 });
 
 canvas.addEventListener('mousemove', event => {
 	pointer = { x: event.offsetX, y: event.offsetY };
+
+	if (dividerDrag) {
+		const plotHeight = canvas.clientHeight - PAD_TOP - PAD_BOTTOM;
+		dragDivider(dividerDrag.index, event.offsetY - dividerDrag.startY, plotHeight, dividerDrag.before);
+		requestRepaint();
+		return;
+	}
+
+	// Cursor is the only affordance telling you a boundary is grabbable.
+	canvas.classList.toggle('resizing', dividerAt(event.offsetY) !== undefined);
 
 	if (dragOrigin && bars.length > 0) {
 		const plotWidth = canvas.clientWidth - PAD_RIGHT;
@@ -825,6 +940,11 @@ canvas.addEventListener('dblclick', () => {
 	viewSize = bars.length;
 	following = true;
 	clampView();
+	if (dividerAt(pointer?.y ?? -1) !== undefined) {
+		// Double-clicking a boundary restores the even split rather than resetting the zoom.
+		paneFractions = [];
+		vscode.postMessage({ type: 'setPaneHeights', paneHeights: [] });
+	}
 	requestRepaint();
 });
 
