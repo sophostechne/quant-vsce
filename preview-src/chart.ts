@@ -50,12 +50,22 @@ function rebuildIndicators(): void {
 	renderLegend();
 }
 
-function renderLegend(): void {
+function renderLegend(atIndex?: number): void {
 	legendLabel.replaceChildren();
 	for (const series of indicatorSeries) {
 		const chip = document.createElement('span');
 		chip.className = 'legend-item';
-		chip.textContent = series.label;
+		let text = series.label;
+		if (atIndex !== undefined) {
+			const values = series.lines
+				.map(line => line[atIndex])
+				.filter((value): value is number => value !== undefined)
+				.map(value => formatValue(value));
+			if (values.length > 0) {
+				text += ` ${values.join('/')}`;
+			}
+		}
+		chip.textContent = text;
 		chip.style.color = `var(--vscode-${series.color.replace('.', '-')})`;
 		legendLabel.appendChild(chip);
 	}
@@ -145,10 +155,11 @@ function renderStatus(): void {
 }
 
 /** OHLC of the hovered bar, or the live price when nothing is hovered. */
-function updateReadout(bar: Bar | undefined): void {
+function updateReadout(bar: Bar | undefined, absoluteIndex?: number): void {
 	if (!bar) {
 		readoutLabel.textContent = '';
 		lastLabel.classList.remove('hidden');
+		renderLegend();
 		return;
 	}
 	// Hide the live price while hovering: two different numbers in the same row, one of them
@@ -161,6 +172,12 @@ function updateReadout(bar: Bar | undefined): void {
 		`L ${bar.low.toFixed(2)}  C ${bar.close.toFixed(2)}  ${sign}${change.toFixed(2)}`;
 	readoutLabel.classList.toggle('up', change >= 0);
 	readoutLabel.classList.toggle('down', change < 0);
+
+	// The legend doubles as an indicator readout while hovering, so values can be read off the
+	// same bar as the OHLC rather than estimated against the axis.
+	if (absoluteIndex !== undefined) {
+		renderLegend(absoluteIndex);
+	}
 }
 
 /** Compact enough for an axis chip: time of day, with a date when the span crosses days. */
@@ -237,6 +254,99 @@ function connectDataPlane(url: string | undefined): void {
 	}
 }
 
+interface Pane {
+	readonly top: number;
+	readonly height: number;
+	readonly min: number;
+	readonly max: number;
+	readonly series: readonly IndicatorSeries[];
+	readonly isPrice: boolean;
+	toY(value: number): number;
+}
+
+/**
+ * Splits the canvas vertically: the price pane keeps whatever the studies do not take.
+ * Studies are capped so a chart with several of them still shows candles.
+ */
+function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
+	const studies = indicatorSeries.filter(series => !series.overlay);
+	const overlays = indicatorSeries.filter(series => series.overlay);
+
+	const studyShare = Math.min(0.18 * studies.length, 0.55);
+	const studyHeight = studies.length > 0 ? (plotHeight * studyShare) / studies.length : 0;
+	const priceHeight = plotHeight - studyHeight * studies.length;
+
+	const panes: Pane[] = [];
+
+	// Price pane: scaled to the visible candles and any overlay running through them, so a
+	// band that pushes outside the price range is not clipped.
+	let min = Infinity;
+	let max = -Infinity;
+	for (const bar of visible) {
+		min = Math.min(min, bar.low);
+		max = Math.max(max, bar.high);
+	}
+	for (const series of overlays) {
+		for (const line of series.lines) {
+			for (let i = 0; i < viewSize; i++) {
+				const value = line[viewOffset + i];
+				if (value !== undefined) {
+					min = Math.min(min, value);
+					max = Math.max(max, value);
+				}
+			}
+		}
+	}
+	if (!isFinite(min) || !isFinite(max) || max === min) {
+		return panes;
+	}
+	const pad = (max - min) * 0.05;
+	panes.push(makePane(PAD_TOP, priceHeight, min - pad, max + pad, overlays, true));
+
+	let top = PAD_TOP + priceHeight;
+	for (const series of studies) {
+		const bounds = series.range ?? visibleBounds(series);
+		panes.push(makePane(top, studyHeight, bounds.min, bounds.max, [series], false));
+		top += studyHeight;
+	}
+	return panes;
+}
+
+function makePane(top: number, height: number, min: number, max: number, series: readonly IndicatorSeries[], isPrice: boolean): Pane {
+	const span = max - min || 1;
+	return {
+		top, height, min, max, series, isPrice,
+		toY: (value: number) => top + (max - value) / span * height,
+	};
+}
+
+/** Scale a study to what is visible, including its histogram, with zero kept in view. */
+function visibleBounds(series: IndicatorSeries): { min: number; max: number } {
+	let min = Infinity;
+	let max = -Infinity;
+	const consider = (value: number | undefined) => {
+		if (value === undefined) { return; }
+		min = Math.min(min, value);
+		max = Math.max(max, value);
+	};
+	for (const line of series.lines) {
+		for (let i = 0; i < viewSize; i++) { consider(line[viewOffset + i]); }
+	}
+	if (series.histogram) {
+		for (let i = 0; i < viewSize; i++) { consider(series.histogram[viewOffset + i]); }
+		// A histogram is read against zero; hiding the baseline makes the bars meaningless.
+		consider(0);
+	}
+	if (!isFinite(min) || !isFinite(max) || max === min) {
+		return { min: 0, max: 1 };
+	}
+	const pad = (max - min) * 0.08;
+	// Padding below zero on a strictly positive series (volume) prints a negative axis label
+	// for a quantity that cannot be negative.
+	const lower = min >= 0 ? Math.max(0, min - pad) : min - pad;
+	return { min: lower, max: max + pad };
+}
+
 function render(): void {
 	const ratio = window.devicePixelRatio || 1;
 	const width = canvas.clientWidth;
@@ -270,40 +380,15 @@ function render(): void {
 		return;
 	}
 
-	// Scale to what is on screen, not to the whole series - otherwise zooming into a quiet
-	// stretch leaves the candles as a flat line against a range set by bars you cannot see.
-	let min = Infinity;
-	let max = -Infinity;
-	for (const bar of visible) {
-		min = Math.min(min, bar.low);
-		max = Math.max(max, bar.high);
+	if (indicatorsDirty) {
+		rebuildIndicators();
 	}
-	if (!isFinite(min) || !isFinite(max) || max === min) {
+
+	const panes = layoutPanes(visible, plotHeight);
+	if (panes.length === 0) {
 		return;
 	}
-	const range = max - min;
-	min -= range * 0.05;
-	max += range * 0.05;
-
-	const toY = (price: number) => PAD_TOP + (max - price) / (max - min) * plotHeight;
-
-	// Grid and price axis.
-	context.strokeStyle = gridColor;
-	context.fillStyle = textColor;
-	context.lineWidth = 1;
-	context.font = '10px var(--vscode-font-family)';
-	context.textBaseline = 'middle';
-	for (let i = 0; i <= 4; i++) {
-		const price = min + (max - min) * (i / 4);
-		const y = Math.round(toY(price)) + 0.5;
-		context.globalAlpha = 0.4;
-		context.beginPath();
-		context.moveTo(0, y);
-		context.lineTo(plotWidth, y);
-		context.stroke();
-		context.globalAlpha = 1;
-		context.fillText(price.toFixed(2), plotWidth + 6, y);
-	}
+	const price = panes[0]!;
 
 	const slot = plotWidth / visible.length;
 	const bodyWidth = Math.max(1, Math.min(slot * 0.7, 12));
@@ -311,6 +396,13 @@ function render(): void {
 	// hairline per bar instead of pretending there is a candle there.
 	const dense = slot < MIN_SLOT_PX;
 
+	context.font = '10px var(--vscode-font-family)';
+
+	for (const pane of panes) {
+		drawPaneAxis(pane, plotWidth, gridColor, textColor);
+	}
+
+	// Candles, in the price pane only.
 	for (let i = 0; i < visible.length; i++) {
 		const bar = visible[i]!;
 		const x = i * slot + slot / 2;
@@ -320,27 +412,26 @@ function render(): void {
 		context.fillStyle = color;
 
 		context.beginPath();
-		context.moveTo(Math.round(x) + 0.5, toY(bar.high));
-		context.lineTo(Math.round(x) + 0.5, toY(bar.low));
+		context.moveTo(Math.round(x) + 0.5, price.toY(bar.high));
+		context.lineTo(Math.round(x) + 0.5, price.toY(bar.low));
 		context.stroke();
 
 		if (!dense) {
-			const openY = toY(bar.open);
-			const closeY = toY(bar.close);
+			const openY = price.toY(bar.open);
+			const closeY = price.toY(bar.close);
 			context.fillRect(x - bodyWidth / 2, Math.min(openY, closeY), bodyWidth, Math.max(1, Math.abs(closeY - openY)));
 		}
 	}
 
-	if (indicatorsDirty) {
-		rebuildIndicators();
+	for (const pane of panes) {
+		drawPaneSeries(pane, visible, slot, upColor, downColor);
 	}
-	drawIndicators(slot, toY);
 
 	drawTimeAxis(visible, slot, plotWidth, height, gridColor, textColor);
 
-	// Last price marker.
+	// Last price marker, on the price pane.
 	if (lastPrice > 0) {
-		const y = Math.round(toY(lastPrice)) + 0.5;
+		const y = Math.round(price.toY(lastPrice)) + 0.5;
 		context.strokeStyle = textColor;
 		context.setLineDash([3, 3]);
 		context.beginPath();
@@ -350,22 +441,90 @@ function render(): void {
 		context.setLineDash([]);
 	}
 
-	drawCrosshair(visible, slot, plotWidth, plotHeight, height, min, max, textColor);
+	drawCrosshair(visible, slot, plotWidth, height, panes, textColor);
+}
+
+/** Horizontal gridlines, edge separator and value labels for one pane. */
+function drawPaneAxis(pane: Pane, plotWidth: number, gridColor: string, textColor: string): void {
+	context.textBaseline = 'middle';
+	context.textAlign = 'left';
+
+	const steps = pane.isPrice ? 4 : 2;
+	for (let i = 0; i <= steps; i++) {
+		const value = pane.min + (pane.max - pane.min) * (i / steps);
+		const y = Math.round(pane.toY(value)) + 0.5;
+		context.strokeStyle = gridColor;
+		context.globalAlpha = 0.4;
+		context.beginPath();
+		context.moveTo(0, y);
+		context.lineTo(plotWidth, y);
+		context.stroke();
+		context.globalAlpha = 1;
+
+		// A study pane's top edge sits on the previous pane's bottom edge, so labelling both
+		// prints two numbers on the same line. The lower pane yields.
+		if (!pane.isPrice && i === steps) {
+			continue;
+		}
+		context.fillStyle = textColor;
+		context.fillText(formatValue(value), plotWidth + 6, y);
+	}
+
+	// A firmer line where one pane ends and the next begins.
+	if (!pane.isPrice) {
+		context.strokeStyle = gridColor;
+		context.beginPath();
+		context.moveTo(0, Math.round(pane.top) + 0.5);
+		context.lineTo(plotWidth, Math.round(pane.top) + 0.5);
+		context.stroke();
+	}
+
+	for (const guide of pane.series[0]?.guides ?? []) {
+		const y = Math.round(pane.toY(guide)) + 0.5;
+		context.strokeStyle = textColor;
+		context.globalAlpha = 0.35;
+		context.setLineDash([2, 4]);
+		context.beginPath();
+		context.moveTo(0, y);
+		context.lineTo(plotWidth, y);
+		context.stroke();
+		context.setLineDash([]);
+		context.globalAlpha = 1;
+	}
 }
 
 /**
- * Overlay lines on the price scale. Values are index-aligned with the full series, so the
+ * Lines and histograms for a pane. Values are index-aligned with the full series, so the
  * viewport is applied by offsetting the read rather than by recomputing over the slice - an
  * average recomputed per viewport would change as you scroll.
  */
-function drawIndicators(slot: number, toY: (price: number) => number): void {
+function drawPaneSeries(pane: Pane, visible: readonly Bar[], slot: number, upColor: string, downColor: string): void {
 	const styles = getComputedStyle(document.body);
 
-	for (const series of indicatorSeries) {
+	for (const series of pane.series) {
 		const color = styles.getPropertyValue(`--vscode-${series.color.replace('.', '-')}`).trim()
 			|| styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
 
-		// Bollinger-style bands shade between their first and last line.
+		if (series.histogram) {
+			const zeroY = pane.toY(Math.max(pane.min, Math.min(0, pane.max)));
+			const barWidth = Math.max(1, slot * 0.6);
+			for (let i = 0; i < viewSize; i++) {
+				const value = series.histogram[viewOffset + i];
+				if (value === undefined) { continue; }
+				const x = i * slot + slot / 2;
+				const y = pane.toY(value);
+				if (series.histogramByBar) {
+					const bar = visible[i];
+					context.fillStyle = bar && bar.close >= bar.open ? upColor : downColor;
+				} else {
+					context.fillStyle = value >= 0 ? upColor : downColor;
+				}
+				context.globalAlpha = 0.55;
+				context.fillRect(x - barWidth / 2, Math.min(y, zeroY), barWidth, Math.max(1, Math.abs(zeroY - y)));
+				context.globalAlpha = 1;
+			}
+		}
+
 		if (series.fill && series.lines.length >= 2) {
 			const upper = series.lines[0]!;
 			const lower = series.lines[series.lines.length - 1]!;
@@ -377,12 +536,12 @@ function drawIndicators(slot: number, toY: (price: number) => number): void {
 				const value = upper[viewOffset + i];
 				if (value === undefined) { continue; }
 				const x = i * slot + slot / 2;
-				if (started) { context.lineTo(x, toY(value)); } else { context.moveTo(x, toY(value)); started = true; }
+				if (started) { context.lineTo(x, pane.toY(value)); } else { context.moveTo(x, pane.toY(value)); started = true; }
 			}
 			for (let i = viewSize - 1; i >= 0; i--) {
 				const value = lower[viewOffset + i];
 				if (value === undefined) { continue; }
-				context.lineTo(i * slot + slot / 2, toY(value));
+				context.lineTo(i * slot + slot / 2, pane.toY(value));
 			}
 			if (started) { context.closePath(); context.fill(); }
 			context.globalAlpha = 1;
@@ -390,11 +549,14 @@ function drawIndicators(slot: number, toY: (price: number) => number): void {
 
 		context.strokeStyle = color;
 		context.lineWidth = 1.25;
-		for (const line of series.lines) {
+		for (let lineIndex = 0; lineIndex < series.lines.length; lineIndex++) {
+			// A second line in the same series (MACD signal, Stochastic %D) is drawn lighter so
+			// the pair is distinguishable without inventing a second colour.
+			context.globalAlpha = lineIndex === 0 ? 1 : 0.55;
 			context.beginPath();
 			let started = false;
 			for (let i = 0; i < viewSize; i++) {
-				const value = line[viewOffset + i];
+				const value = series.lines[lineIndex]![viewOffset + i];
 				if (value === undefined) {
 					// A gap in the series is a genuine gap - break the path rather than
 					// interpolating across bars where the indicator was not defined.
@@ -402,13 +564,23 @@ function drawIndicators(slot: number, toY: (price: number) => number): void {
 					continue;
 				}
 				const x = i * slot + slot / 2;
-				const y = toY(value);
+				const y = pane.toY(value);
 				if (started) { context.lineTo(x, y); } else { context.moveTo(x, y); started = true; }
 			}
 			context.stroke();
 		}
+		context.globalAlpha = 1;
 		context.lineWidth = 1;
 	}
+}
+
+/** Axis labels shrink to something readable regardless of the value's magnitude. */
+function formatValue(value: number): string {
+	const magnitude = Math.abs(value);
+	if (magnitude >= 1_000_000) { return `${(value / 1_000_000).toFixed(2)}M`; }
+	if (magnitude >= 10_000) { return `${(value / 1_000).toFixed(1)}k`; }
+	if (magnitude >= 1) { return value.toFixed(2); }
+	return value.toFixed(4);
 }
 
 /** Time labels along the bottom, spaced so they never collide regardless of zoom. */
@@ -445,11 +617,13 @@ function drawTimeAxis(
 
 /**
  * Crosshair plus its axis labels. Snaps horizontally to the nearest bar rather than tracking
- * the raw cursor, so the readout always names a bar that exists.
+ * the raw cursor, so the readout always names a bar that exists. The vertical line spans every
+ * pane; the value chip reads from whichever pane the cursor is actually in, because an RSI of
+ * 70 and a price of 70 are not the same quantity.
  */
 function drawCrosshair(
-	visible: readonly Bar[], slot: number, plotWidth: number, plotHeight: number, height: number,
-	min: number, max: number, textColor: string,
+	visible: readonly Bar[], slot: number, plotWidth: number, height: number,
+	panes: readonly Pane[], textColor: string,
 ): void {
 	if (!pointer || pointer.x > plotWidth || visible.length === 0) {
 		updateReadout(undefined);
@@ -459,15 +633,20 @@ function drawCrosshair(
 	const localIndex = Math.max(0, Math.min(visible.length - 1, Math.floor(pointer.x / slot)));
 	const bar = visible[localIndex]!;
 	const snapX = Math.round(localIndex * slot + slot / 2) + 0.5;
-	const y = Math.round(Math.max(PAD_TOP, Math.min(pointer.y, PAD_TOP + plotHeight))) + 0.5;
-	const price = max - ((y - PAD_TOP) / plotHeight) * (max - min);
+
+	const last = panes[panes.length - 1]!;
+	const bottom = last.top + last.height;
+	const y = Math.round(Math.max(PAD_TOP, Math.min(pointer.y, bottom))) + 0.5;
+
+	const pane = panes.find(p => y >= p.top && y <= p.top + p.height) ?? panes[0]!;
+	const value = pane.max - ((y - pane.top) / pane.height) * (pane.max - pane.min);
 
 	context.strokeStyle = textColor;
 	context.globalAlpha = 0.7;
 	context.setLineDash([2, 3]);
 	context.beginPath();
 	context.moveTo(snapX, PAD_TOP);
-	context.lineTo(snapX, PAD_TOP + plotHeight);
+	context.lineTo(snapX, bottom);
 	context.moveTo(0, y);
 	context.lineTo(plotWidth, y);
 	context.stroke();
@@ -477,18 +656,17 @@ function drawCrosshair(
 	const chipBackground = getComputedStyle(document.body)
 		.getPropertyValue('--vscode-editor-background').trim() || '#1e1e1e';
 
-	// Price chip on the right axis.
 	context.font = '10px var(--vscode-font-family)';
 	context.textBaseline = 'middle';
-	const priceText = price.toFixed(2);
+	context.textAlign = 'left';
+	const valueText = formatValue(value);
 	context.fillStyle = chipBackground;
 	context.fillRect(plotWidth + 2, y - 8, PAD_RIGHT - 4, 16);
 	context.strokeStyle = textColor;
 	context.strokeRect(plotWidth + 2.5, y - 7.5, PAD_RIGHT - 5, 15);
 	context.fillStyle = textColor;
-	context.fillText(priceText, plotWidth + 6, y);
+	context.fillText(valueText, plotWidth + 6, y);
 
-	// Time chip on the bottom axis.
 	const timeText = formatTime(bar.time);
 	context.textAlign = 'center';
 	const chipWidth = context.measureText(timeText).width + 10;
@@ -502,7 +680,7 @@ function drawCrosshair(
 	context.fillText(timeText, chipX + chipWidth / 2, height - PAD_BOTTOM + 5);
 	context.textAlign = 'left';
 
-	updateReadout(bar);
+	updateReadout(bar, viewOffset + localIndex);
 }
 
 window.addEventListener('message', (event: MessageEvent<HostMessage>) => {

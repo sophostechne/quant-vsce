@@ -26,5 +26,7 @@
 	"config.backtest.product": "Instrument to backtest against.",
 	"config.backtest.timeframe": "Bar timeframe for backtests.",
 	"config.backtest.bars": "Number of bars to fetch for a backtest.",
-	"config.backtest.params": "Extra strategy config values, merged into the strategy's config object."
+	"config.backtest.params": "Extra strategy config values, merged into the strategy's config object.",
+	"cmd.addIndicator": "Add Indicator",
+	"cmd.removeIndicator": "Remove Indicator"
 }

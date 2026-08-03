@@ -112,6 +112,18 @@
         "title": "%cmd.runBacktest%",
         "category": "%cmd.category%",
         "icon": "$(play)"
+      },
+      {
+        "command": "quant.addIndicator",
+        "title": "%cmd.addIndicator%",
+        "category": "%cmd.category%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "quant.removeIndicator",
+        "title": "%cmd.removeIndicator%",
+        "category": "%cmd.category%",
+        "icon": "$(close)"
       }
     ],
     "menus": {
@@ -154,6 +166,18 @@
           "command": "quant.runBacktest",
           "when": "resourceExtname == .py && resourceDirname =~ /strategies/",
           "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "quant.addIndicator",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "navigation@1"
+        },
+        {
+          "command": "quant.removeIndicator",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "navigation@2"
         }
       ]
     },
