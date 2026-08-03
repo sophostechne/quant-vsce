@@ -42,6 +42,8 @@ export interface ConfigMessage {
 	timeframes: readonly string[];
 	dataPlaneUrl?: string;
 	symbolId?: number;
+	style?: string;
+	styleOptions?: { brickSize?: number; lineBreakCount?: number; baselineValue?: number };
 	indicators?: readonly IndicatorSpec[];
 	paneHeights?: readonly number[];
 	simulated: boolean;

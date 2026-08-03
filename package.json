@@ -124,6 +124,12 @@
         "title": "%cmd.removeIndicator%",
         "category": "%cmd.category%",
         "icon": "$(close)"
+      },
+      {
+        "command": "quant.setChartStyle",
+        "title": "%cmd.setChartStyle%",
+        "category": "%cmd.category%",
+        "icon": "$(symbol-color)"
       }
     ],
     "menus": {
@@ -169,6 +175,11 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "quant.setChartStyle",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "navigation@0"
+        },
         {
           "command": "quant.addIndicator",
           "when": "activeCustomEditorId == quant.chart",

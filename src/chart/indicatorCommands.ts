@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { IndicatorSpec, IndicatorType, describeIndicator, parseModel, writeModel } from './chartModel';
+import { ChartStyle, IndicatorSpec, IndicatorType, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
 import { Logger } from '../logger';
 
 /** Numeric config keys a picker can prompt for. */
@@ -37,7 +37,33 @@ export function registerIndicatorCommands(log: Logger): vscode.Disposable {
 	return vscode.Disposable.from(
 		vscode.commands.registerCommand('quant.addIndicator', () => addIndicator(log)),
 		vscode.commands.registerCommand('quant.removeIndicator', () => removeIndicator(log)),
+		vscode.commands.registerCommand('quant.setChartStyle', () => setChartStyle(log)),
 	);
+}
+
+async function setChartStyle(log: Logger): Promise<void> {
+	const document = await activeChartDocument();
+	if (!document) {
+		return;
+	}
+	const model = parseModel(document, log);
+
+	const picked = await vscode.window.showQuickPick(
+		STYLE_LABELS.map(entry => ({
+			label: entry.label,
+			description: entry.description,
+			// A tick beside the current style, so the picker reports state as well as setting it.
+			picked: entry.style === model.style,
+			style: entry.style as ChartStyle,
+		})),
+		{ title: vscode.l10n.t('Chart Style'), placeHolder: model.style },
+	);
+	if (!picked || picked.style === model.style) {
+		return;
+	}
+
+	await writeModel(document, { ...model, style: picked.style });
+	log.info(`Chart style set to ${picked.style} for ${document.uri.fsPath}`);
 }
 
 /** The `.chart` document behind the active custom editor, if there is one. */
