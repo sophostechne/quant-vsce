@@ -4,9 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { CHART_VIEW_TYPE, ChartEditorProvider, defaultChartContent } from './chart/chartEditor';
+import { CHART_VIEW_TYPE, ChartEditorProvider } from './chart/chartEditor';
+import { defaultChartContent } from './chart/chartModel';
 import { Logger } from './logger';
 import { ConnectionState, MarketDataClient } from './marketData/client';
+import { registerIndicatorCommands } from './chart/indicatorCommands';
 import { BacktestRunner, formatResult } from './strategies/backtestRunner';
 import { StrategiesProvider, StrategyNode } from './strategies/strategiesView';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
@@ -33,6 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(ChartEditorProvider.register(context, client, log));
+	context.subscriptions.push(registerIndicatorCommands(log));
 	context.subscriptions.push(createStatusBarItem(client));
 
 	context.subscriptions.push(

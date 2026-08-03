@@ -7,62 +7,9 @@ import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { ConnectionState, MarketDataClient } from '../marketData/client';
 import { Bar, TIMEFRAMES, Tick, Timeframe } from '../protocol';
+import { ChartDocumentModel, parseModel, writeModel } from './chartModel';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
-
-/** Overlay indicators drawn on the price scale. Oscillators would need their own pane. */
-const INDICATOR_TYPES = ['sma', 'ema', 'bbands', 'vwap'] as const;
-type IndicatorType = typeof INDICATOR_TYPES[number];
-
-interface IndicatorSpec {
-	type: IndicatorType;
-	period?: number;
-	stddev?: number;
-	color?: string;
-}
-
-interface ChartDocumentModel {
-	symbol: string;
-	timeframe: Timeframe;
-	bars: number;
-	indicators: IndicatorSpec[];
-}
-
-const DEFAULT_MODEL: ChartDocumentModel = { symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [] };
-
-/**
- * Indicators come from the document, so a malformed entry is user input rather than a bug.
- * Unknown types are dropped rather than rejecting the whole file - one bad line should not
- * blank the chart.
- */
-function parseIndicators(value: unknown, log: Logger): IndicatorSpec[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	const parsed: IndicatorSpec[] = [];
-	for (const entry of value) {
-		if (typeof entry !== 'object' || entry === null) {
-			continue;
-		}
-		const candidate = entry as Partial<IndicatorSpec>;
-		if (!INDICATOR_TYPES.includes(candidate.type as IndicatorType)) {
-			log.warn(`Ignoring unknown indicator type: ${JSON.stringify(candidate.type)}`);
-			continue;
-		}
-		const spec: IndicatorSpec = { type: candidate.type as IndicatorType };
-		if (typeof candidate.period === 'number' && candidate.period >= 2) {
-			spec.period = Math.min(Math.floor(candidate.period), 1000);
-		}
-		if (typeof candidate.stddev === 'number' && candidate.stddev > 0) {
-			spec.stddev = Math.min(candidate.stddev, 10);
-		}
-		if (typeof candidate.color === 'string') {
-			spec.color = candidate.color;
-		}
-		parsed.push(spec);
-	}
-	return parsed;
-}
 
 /**
  * Charts are `.chart` files - JSON describing the symbol and timeframe - opened through a
@@ -259,43 +206,6 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 </body>
 </html>`;
 	}
-}
-
-function parseModel(document: vscode.TextDocument, log: Logger): ChartDocumentModel {
-	const text = document.getText().trim();
-	if (!text) {
-		return { ...DEFAULT_MODEL };
-	}
-	try {
-		const parsed = JSON.parse(text) as Partial<ChartDocumentModel>;
-		const timeframe = TIMEFRAMES.includes(parsed.timeframe as Timeframe)
-			? parsed.timeframe as Timeframe
-			: DEFAULT_MODEL.timeframe;
-		return {
-			symbol: typeof parsed.symbol === 'string' && parsed.symbol.trim() ? parsed.symbol.trim().toUpperCase() : DEFAULT_MODEL.symbol,
-			timeframe,
-			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars,
-			indicators: parseIndicators(parsed.indicators, log)
-		};
-	} catch {
-		log.warn(`${document.uri.fsPath} is not valid JSON; using defaults.`);
-		return { ...DEFAULT_MODEL };
-	}
-}
-
-async function writeModel(document: vscode.TextDocument, model: ChartDocumentModel): Promise<void> {
-	const edit = new vscode.WorkspaceEdit();
-	edit.replace(
-		document.uri,
-		new vscode.Range(0, 0, document.lineCount, 0),
-		JSON.stringify(model, undefined, '\t') + '\n'
-	);
-	await vscode.workspace.applyEdit(edit);
-}
-
-export function defaultChartContent(symbol: string): string {
-	const model: ChartDocumentModel = { ...DEFAULT_MODEL, symbol };
-	return JSON.stringify(model, undefined, '\t') + '\n';
 }
 
 export type { Bar };

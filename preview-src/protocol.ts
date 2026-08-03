@@ -26,9 +26,12 @@ export interface Bar {
 export type BarSource = 'live' | 'simulated';
 
 export interface IndicatorSpec {
-	type: 'sma' | 'ema' | 'bbands' | 'vwap';
+	type: 'sma' | 'ema' | 'bbands' | 'vwap' | 'rsi' | 'macd' | 'stoch' | 'atr' | 'volume';
 	period?: number;
 	stddev?: number;
+	fast?: number;
+	slow?: number;
+	signal?: number;
 	color?: string;
 }
 
