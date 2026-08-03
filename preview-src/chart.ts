@@ -9,6 +9,7 @@ import {
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
 import { ChartStyle, StyleOptions, TRANSFORM_STYLES, drawPriceSeries, transformBars } from './chartTypes';
+import { Drawing, DrawingTool, Projection, drawDrawings, hitTest, needsTwoPoints } from './drawings';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -131,6 +132,37 @@ let paneFractions: number[] = [];
 /** Boundaries from the last paint, so hit-testing matches what is on screen. */
 let dividerYs: number[] = [];
 let dividerDrag: { index: number; startY: number; before: number[] } | undefined;
+
+// -- Drawings --------------------------------------------------------------------------
+
+let drawings: Drawing[] = [];
+let armedTool: DrawingTool | undefined;
+/** In-progress drag; rendered as a preview until released. */
+let pendingDrawing: Drawing | undefined;
+let selectedDrawing: number | undefined;
+/** Projection from the last paint, so hit-testing matches what is on screen. */
+let projection: Projection | undefined;
+
+function commitDrawings(): void {
+	vscode.postMessage({ type: 'setDrawings', drawings });
+}
+
+/** Nearest bar to a timestamp, so an anchor always lands on a real bar. */
+function indexForTime(time: number): number | undefined {
+	if (bars.length === 0) {
+		return undefined;
+	}
+	let best = 0;
+	let bestDelta = Infinity;
+	for (let i = 0; i < bars.length; i++) {
+		const delta = Math.abs(bars[i]!.time - time);
+		if (delta < bestDelta) {
+			bestDelta = delta;
+			best = i;
+		}
+	}
+	return best;
+}
 
 /** Even split when unset, and always the right length for the current study count. */
 function resolvedFractions(studyCount: number): number[] {
@@ -587,6 +619,29 @@ function render(): void {
 		drawPaneSeries(pane, visible, slot, upColor, downColor);
 	}
 
+	// Rebuilt each paint: it closes over the current viewport, scale and pane geometry.
+	projection = {
+		plotWidth,
+		plotTop: price.top,
+		plotBottom: price.top + price.height,
+		yForPrice: (value: number) => price.toY(value),
+		priceForY: (y: number) => price.fromY(y),
+		xForTime: (time: number) => {
+			const index = indexForTime(time);
+			if (index === undefined || index < viewOffset || index >= viewOffset + viewSize) {
+				return undefined;
+			}
+			return (index - viewOffset) * slot + slot / 2;
+		},
+		timeForX: (x: number) => {
+			const index = viewOffset + Math.floor(x / slot);
+			return bars[Math.max(0, Math.min(bars.length - 1, index))]?.time;
+		},
+	};
+
+	const annotations = pendingDrawing ? [...drawings, pendingDrawing] : drawings;
+	drawDrawings(context, annotations, projection, textColor, selectedDrawing);
+
 	drawTimeAxis(visible, slot, plotWidth, height, gridColor, textColor);
 
 	// Last price marker, on the price pane.
@@ -857,6 +912,12 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 				indicatorsDirty = true;
 			}
 			paneFractions = [...(message.paneHeights ?? [])];
+			drawings = (message.drawings ?? []).map(entry => ({
+				tool: entry.tool as DrawingTool,
+				points: entry.points.map(point => ({ ...point })),
+				color: entry.color,
+			}));
+			selectedDrawing = undefined;
 
 			priceScale = message.scale === 'log' ? 'log' : 'linear';
 
@@ -924,6 +985,12 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			barsError = message.message;
 			renderStatus();
 			break;
+
+		case 'armTool':
+			armedTool = message.tool as DrawingTool | undefined;
+			pendingDrawing = undefined;
+			canvas.classList.toggle('drawing', armedTool !== undefined);
+			break;
 	}
 });
 
@@ -976,11 +1043,57 @@ canvas.addEventListener('mousedown', event => {
 		};
 		return;
 	}
+	if (armedTool && projection) {
+		const time = projection.timeForX(event.offsetX);
+		if (time !== undefined) {
+			const point = { time, price: projection.priceForY(event.offsetY) };
+			if (needsTwoPoints(armedTool)) {
+				// Start a drag; the second anchor follows the cursor until release.
+				pendingDrawing = { tool: armedTool, points: [point, point] };
+			} else {
+				drawings = [...drawings, { tool: armedTool, points: [point] }];
+				armedTool = undefined;
+				canvas.classList.remove('drawing');
+				commitDrawings();
+			}
+			requestRepaint();
+		}
+		return;
+	}
+
+	// Clicking an existing drawing selects it; clicking empty space clears the selection.
+	if (projection) {
+		const hit = hitTest(drawings, event.offsetX, event.offsetY, projection);
+		if (hit !== undefined) {
+			selectedDrawing = hit;
+			requestRepaint();
+			return;
+		}
+		if (selectedDrawing !== undefined) {
+			selectedDrawing = undefined;
+			requestRepaint();
+		}
+	}
+
 	dragOrigin = { x: event.offsetX, offset: viewOffset };
 	canvas.classList.add('dragging');
 });
 
 window.addEventListener('mouseup', () => {
+	if (pendingDrawing) {
+		const [start, end] = pendingDrawing.points;
+		// A click without a drag is not a two-point shape; discard rather than storing a
+		// zero-length line that cannot be seen or selected.
+		if (start && end && (start.time !== end.time || start.price !== end.price)) {
+			drawings = [...drawings, pendingDrawing];
+			commitDrawings();
+		}
+		pendingDrawing = undefined;
+		armedTool = undefined;
+		canvas.classList.remove('drawing');
+		requestRepaint();
+		return;
+	}
 	if (dividerDrag) {
 		dividerDrag = undefined;
 		// Persist on release, so a drag is a single undo step rather than hundreds.
@@ -997,6 +1110,18 @@ canvas.addEventListener('mousemove', event => {
 		const plotHeight = canvas.clientHeight - PAD_TOP - PAD_BOTTOM;
 		dragDivider(dividerDrag.index, event.offsetY - dividerDrag.startY, plotHeight, dividerDrag.before);
 		requestRepaint();
+		return;
+	}
+
+	if (pendingDrawing && projection) {
+		const time = projection.timeForX(event.offsetX);
+		if (time !== undefined) {
+			pendingDrawing = {
+				...pendingDrawing,
+				points: [pendingDrawing.points[0]!, { time, price: projection.priceForY(event.offsetY) }],
+			};
+			requestRepaint();
+		}
 		return;
 	}
 
@@ -1030,6 +1155,27 @@ canvas.addEventListener('dblclick', () => {
 		vscode.postMessage({ type: 'setPaneHeights', paneHeights: [] });
 	}
 	requestRepaint();
+});
+
+window.addEventListener('keydown', event => {
+	if (event.key === 'Escape') {
+		if (armedTool || pendingDrawing) {
+			armedTool = undefined;
+			pendingDrawing = undefined;
+			canvas.classList.remove('drawing');
+			requestRepaint();
+		} else if (selectedDrawing !== undefined) {
+			selectedDrawing = undefined;
+			requestRepaint();
+		}
+		return;
+	}
+	if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawing !== undefined) {
+		drawings = drawings.filter((_, index) => index !== selectedDrawing);
+		selectedDrawing = undefined;
+		commitDrawings();
+		requestRepaint();
+	}
 });
 
 window.addEventListener('resize', requestRepaint);

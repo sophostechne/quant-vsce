@@ -135,3 +135,7 @@ body {
 #canvas.resizing {
 	cursor: row-resize;
 }
+
+#canvas.drawing {
+	cursor: crosshair;
+}

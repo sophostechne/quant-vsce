@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { ChartStyle, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
+import { ChartStyle, DRAWING_LABELS, DrawingTool, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
+import { postToChart } from './chartEditor';
 import { Logger } from '../logger';
 
 /** Numeric config keys a picker can prompt for. */
@@ -39,7 +40,45 @@ export function registerIndicatorCommands(log: Logger): vscode.Disposable {
 		vscode.commands.registerCommand('quant.removeIndicator', () => removeIndicator(log)),
 		vscode.commands.registerCommand('quant.setChartStyle', () => setChartStyle(log)),
 		vscode.commands.registerCommand('quant.setChartScale', () => setChartScale(log)),
+		vscode.commands.registerCommand('quant.draw', () => armDrawingTool()),
+		vscode.commands.registerCommand('quant.clearDrawings', () => clearDrawings(log)),
 	);
+}
+
+/**
+ * Arms a tool on the chart's webview rather than writing to the document: nothing is saved
+ * until a shape is actually drawn, so cancelling with Escape leaves no trace.
+ */
+async function armDrawingTool(): Promise<void> {
+	const document = await activeChartDocument();
+	if (!document) {
+		return;
+	}
+	const picked = await vscode.window.showQuickPick(
+		DRAWING_LABELS.map(entry => ({ label: entry.label, description: entry.description, tool: entry.tool as DrawingTool })),
+		{ title: vscode.l10n.t('Draw'), placeHolder: vscode.l10n.t('Escape cancels; Delete removes a selected drawing') },
+	);
+	if (!picked) {
+		return;
+	}
+	if (!postToChart(document.uri, { type: 'armTool', tool: picked.tool })) {
+		void vscode.window.showWarningMessage(vscode.l10n.t('The chart is not open.'));
+	}
+}
+
+async function clearDrawings(log: Logger): Promise<void> {
+	const document = await activeChartDocument();
+	if (!document) {
+		return;
+	}
+	const model = parseModel(document, log);
+	if (model.drawings.length === 0) {
+		void vscode.window.showInformationMessage(vscode.l10n.t('This chart has no drawings.'));
+		return;
+	}
+	// Undoable like any other document edit, so no confirmation prompt is warranted.
+	await writeModel(document, { ...model, drawings: [] });
+	log.info(`Cleared ${model.drawings.length} drawing(s) from ${document.uri.fsPath}`);
 }
 
 async function setChartScale(log: Logger): Promise<void> {

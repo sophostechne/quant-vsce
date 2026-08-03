@@ -30,5 +30,7 @@
 	"cmd.addIndicator": "Add Indicator",
 	"cmd.removeIndicator": "Remove Indicator",
 	"cmd.setChartStyle": "Chart Style",
-	"cmd.setChartScale": "Price Scale"
+	"cmd.setChartScale": "Price Scale",
+	"cmd.draw": "Draw",
+	"cmd.clearDrawings": "Clear Drawings"
 }
