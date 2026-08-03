@@ -196,6 +196,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		<input id="symbol" class="symbol" spellcheck="false" autocomplete="off">
 		<select id="timeframe" class="timeframe"></select>
 		<span id="last" class="last"></span>
+		<span id="readout" class="readout"></span>
 		<span id="status" class="status"></span>
 	</header>
 	<canvas id="canvas"></canvas>

@@ -80,3 +80,29 @@ body {
 	width: 100%;
 	min-height: 0;
 }
+
+.readout {
+	font-variant-numeric: tabular-nums;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.readout.up {
+	color: var(--vscode-charts-green);
+}
+
+.readout.down {
+	color: var(--vscode-charts-red);
+}
+
+.hidden {
+	display: none;
+}
+
+#canvas {
+	cursor: crosshair;
+}
+
+#canvas.dragging {
+	cursor: grabbing;
+}
