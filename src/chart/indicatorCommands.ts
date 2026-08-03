@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { ChartStyle, DRAWING_LABELS, DrawingTool, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
+import { ChartStyle, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
+import { CATEGORY_LABELS, DrawingCategory, TOOL_SPECS } from './drawingCatalogue';
 import { postToChart } from './chartEditor';
 import { Logger } from '../logger';
 
@@ -54,15 +55,53 @@ async function armDrawingTool(): Promise<void> {
 	if (!document) {
 		return;
 	}
-	const picked = await vscode.window.showQuickPick(
-		DRAWING_LABELS.map(entry => ({ label: entry.label, description: entry.description, tool: entry.tool as DrawingTool })),
-		{ title: vscode.l10n.t('Draw'), placeHolder: vscode.l10n.t('Escape cancels; Delete removes a selected drawing') },
-	);
-	if (!picked) {
+	// One flat list with category separators rather than a two-step pick: the catalogue is
+	// long, but the whole point of a quick pick is that typing beats navigating.
+	const items: (vscode.QuickPickItem & { tool?: string })[] = [];
+	let lastCategory: DrawingCategory | undefined;
+	for (const spec of TOOL_SPECS) {
+		if (spec.category !== lastCategory) {
+			lastCategory = spec.category;
+			items.push({ label: CATEGORY_LABELS[spec.category], kind: vscode.QuickPickItemKind.Separator });
+		}
+		items.push({
+			label: spec.label,
+			description: spec.description ?? placementHint(spec.placement, spec.points),
+			tool: spec.tool,
+		});
+	}
+
+	const picked = await vscode.window.showQuickPick(items, {
+		title: vscode.l10n.t('Draw'),
+		matchOnDescription: true,
+		placeHolder: vscode.l10n.t('Escape cancels; Delete removes a selected drawing'),
+	});
+	if (!picked?.tool) {
 		return;
 	}
-	if (!postToChart(document.uri, { type: 'armTool', tool: picked.tool })) {
+
+	const spec = TOOL_SPECS.find(entry => entry.tool === picked.tool);
+	let text: string | undefined;
+	if (spec?.needsText) {
+		// Collected before arming, so the caption exists by the time the shape is placed and
+		// there is no half-created drawing waiting on a prompt.
+		text = await vscode.window.showInputBox({ title: spec.label, prompt: vscode.l10n.t('Caption') });
+		if (text === undefined) {
+			return;
+		}
+	}
+
+	if (!postToChart(document.uri, { type: 'armTool', tool: picked.tool, text })) {
 		void vscode.window.showWarningMessage(vscode.l10n.t('The chart is not open.'));
+	}
+}
+
+function placementHint(placement: string, points: number): string {
+	switch (placement) {
+		case 'drag': return 'drag';
+		case 'point': return 'click';
+		case 'freehand': return 'drag to draw freely';
+		default: return `${points} clicks`;
 	}
 }
 

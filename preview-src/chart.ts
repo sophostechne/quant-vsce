@@ -9,7 +9,8 @@ import {
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
 import { ChartStyle, StyleOptions, TRANSFORM_STYLES, drawPriceSeries, transformBars } from './chartTypes';
-import { Drawing, DrawingTool, Projection, drawDrawings, hitTest, needsTwoPoints } from './drawings';
+import { Drawing, Projection, drawDrawings, hitTest } from './drawings';
+import { specFor } from './drawingTools';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -136,12 +137,27 @@ let dividerDrag: { index: number; startY: number; before: number[] } | undefined
 // -- Drawings --------------------------------------------------------------------------
 
 let drawings: Drawing[] = [];
-let armedTool: DrawingTool | undefined;
+let armedTool: string | undefined;
+/** Anchors clicked so far for a sequence tool. */
+let sequencePoints: { time: number; price: number }[] = [];
+/** Caption supplied by the host when the armed tool needs one. */
+let armedText: string | undefined;
 /** In-progress drag; rendered as a preview until released. */
 let pendingDrawing: Drawing | undefined;
 let selectedDrawing: number | undefined;
 /** Projection from the last paint, so hit-testing matches what is on screen. */
 let projection: Projection | undefined;
+
+/** Stores a completed drawing and disarms, which is the only path that writes to the document. */
+function finishDrawing(drawing: Drawing): void {
+	drawings = [...drawings, drawing];
+	pendingDrawing = undefined;
+	armedTool = undefined;
+	armedText = undefined;
+	sequencePoints = [];
+	canvas.classList.remove('drawing');
+	commitDrawings();
+}
 
 function commitDrawings(): void {
 	vscode.postMessage({ type: 'setDrawings', drawings });
@@ -633,6 +649,12 @@ function render(): void {
 			}
 			return (index - viewOffset) * slot + slot / 2;
 		},
+		// Forecasts, time zones and cycle lines deliberately reach past the last bar, so they
+		// need a mapping that keeps going rather than one that gives up at the edge.
+		xForTimeUnclamped: (time: number) => {
+			const index = indexForTime(time);
+			return index === undefined ? 0 : (index - viewOffset) * slot + slot / 2;
+		},
 		timeForX: (x: number) => {
 			const index = viewOffset + Math.floor(x / slot);
 			return bars[Math.max(0, Math.min(bars.length - 1, index))]?.time;
@@ -640,7 +662,7 @@ function render(): void {
 	};
 
 	const annotations = pendingDrawing ? [...drawings, pendingDrawing] : drawings;
-	drawDrawings(context, annotations, projection, textColor, selectedDrawing);
+	drawDrawings(context, annotations, projection, { text: textColor, up: upColor, down: downColor }, selectedDrawing);
 
 	drawTimeAxis(visible, slot, plotWidth, height, gridColor, textColor);
 
@@ -913,9 +935,10 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			}
 			paneFractions = [...(message.paneHeights ?? [])];
 			drawings = (message.drawings ?? []).map(entry => ({
-				tool: entry.tool as DrawingTool,
+				tool: entry.tool,
 				points: entry.points.map(point => ({ ...point })),
 				color: entry.color,
+				text: entry.text,
 			}));
 			selectedDrawing = undefined;
 
@@ -987,9 +1010,12 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			break;
 
 		case 'armTool':
-			armedTool = message.tool as DrawingTool | undefined;
+			armedTool = message.tool;
+			armedText = message.text;
+			sequencePoints = [];
 			pendingDrawing = undefined;
 			canvas.classList.toggle('drawing', armedTool !== undefined);
+			requestRepaint();
 			break;
 	}
 });
@@ -1045,19 +1071,39 @@ canvas.addEventListener('mousedown', event => {
 	}
 	if (armedTool && projection) {
 		const time = projection.timeForX(event.offsetX);
-		if (time !== undefined) {
-			const point = { time, price: projection.priceForY(event.offsetY) };
-			if (needsTwoPoints(armedTool)) {
-				// Start a drag; the second anchor follows the cursor until release.
-				pendingDrawing = { tool: armedTool, points: [point, point] };
-			} else {
-				drawings = [...drawings, { tool: armedTool, points: [point] }];
-				armedTool = undefined;
-				canvas.classList.remove('drawing');
-				commitDrawings();
-			}
-			requestRepaint();
+		const spec = specFor(armedTool);
+		if (time === undefined || !spec) {
+			return;
 		}
+		const point = { time, price: projection.priceForY(event.offsetY) };
+
+		switch (spec.placement) {
+			case 'point':
+				finishDrawing({ tool: armedTool, points: [point], text: armedText });
+				break;
+
+			case 'drag':
+				// The second anchor follows the cursor until release.
+				pendingDrawing = { tool: armedTool, points: [point, point], text: armedText };
+				break;
+
+			case 'freehand':
+				pendingDrawing = { tool: armedTool, points: [point], text: armedText };
+				break;
+
+			case 'sequence': {
+				sequencePoints = [...sequencePoints, point];
+				if (sequencePoints.length >= spec.points) {
+					finishDrawing({ tool: armedTool, points: sequencePoints, text: armedText });
+					sequencePoints = [];
+				} else {
+					// Preview the anchors placed so far, plus one that tracks the cursor.
+					pendingDrawing = { tool: armedTool, points: [...sequencePoints, point], text: armedText };
+				}
+				break;
+			}
+		}
+		requestRepaint();
 		return;
 	}
 
@@ -1080,19 +1126,31 @@ canvas.addEventListener('mousedown', event => {
 });
 
 window.addEventListener('mouseup', () => {
-	if (pendingDrawing) {
-		const [start, end] = pendingDrawing.points;
-		// A click without a drag is not a two-point shape; discard rather than storing a
-		// zero-length line that cannot be seen or selected.
-		if (start && end && (start.time !== end.time || start.price !== end.price)) {
-			drawings = [...drawings, pendingDrawing];
-			commitDrawings();
+	if (pendingDrawing && armedTool) {
+		const spec = specFor(armedTool);
+		if (spec?.placement === 'drag') {
+			const [start, end] = pendingDrawing.points;
+			// A click without a drag is not a two-point shape; discard rather than storing a
+			// zero-length line that cannot be seen or selected.
+			if (start && end && (start.time !== end.time || start.price !== end.price)) {
+				finishDrawing(pendingDrawing);
+			} else {
+				pendingDrawing = undefined;
+			}
+			requestRepaint();
+			return;
 		}
-		pendingDrawing = undefined;
-		armedTool = undefined;
-		canvas.classList.remove('drawing');
-		requestRepaint();
-		return;
+		if (spec?.placement === 'freehand') {
+			// Two anchors is the shortest stroke worth keeping.
+			if (pendingDrawing.points.length > 1) {
+				finishDrawing(pendingDrawing);
+			} else {
+				pendingDrawing = undefined;
+			}
+			requestRepaint();
+			return;
+		}
+		// Sequence tools stay armed between clicks.
 	}
 	if (dividerDrag) {
 		dividerDrag = undefined;
@@ -1113,16 +1171,28 @@ canvas.addEventListener('mousemove', event => {
 		return;
 	}
 
-	if (pendingDrawing && projection) {
+	if (armedTool && projection) {
+		const spec = specFor(armedTool);
 		const time = projection.timeForX(event.offsetX);
-		if (time !== undefined) {
-			pendingDrawing = {
-				...pendingDrawing,
-				points: [pendingDrawing.points[0]!, { time, price: projection.priceForY(event.offsetY) }],
-			};
-			requestRepaint();
+		if (spec && time !== undefined) {
+			const point = { time, price: projection.priceForY(event.offsetY) };
+			if (pendingDrawing && spec.placement === 'freehand') {
+				// Every sampled position becomes an anchor, which is what makes it freehand.
+				pendingDrawing = { ...pendingDrawing, points: [...pendingDrawing.points, point] };
+				requestRepaint();
+				return;
+			}
+			if (pendingDrawing && spec.placement === 'drag') {
+				pendingDrawing = { ...pendingDrawing, points: [pendingDrawing.points[0]!, point] };
+				requestRepaint();
+				return;
+			}
+			if (spec.placement === 'sequence' && sequencePoints.length > 0) {
+				pendingDrawing = { tool: armedTool, points: [...sequencePoints, point], text: armedText };
+				requestRepaint();
+				return;
+			}
 		}
-		return;
 	}
 
 	// Cursor is the only affordance telling you a boundary is grabbable.
@@ -1162,6 +1232,8 @@ window.addEventListener('keydown', event => {
 		if (armedTool || pendingDrawing) {
 			armedTool = undefined;
 			pendingDrawing = undefined;
+			sequencePoints = [];
+			armedText = undefined;
 			canvas.classList.remove('drawing');
 			requestRepaint();
 		} else if (selectedDrawing !== undefined) {
