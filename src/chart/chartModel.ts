@@ -41,14 +41,12 @@ export interface StyleOptions {
 
 export type PriceScale = 'linear' | 'log';
 
-const DRAWING_TOOLS = ['trendline', 'ray', 'horizontal', 'vertical', 'rectangle', 'fib'] as const;
-export type DrawingTool = typeof DRAWING_TOOLS[number];
-
 export interface DrawingPoint { time: number; price: number }
 export interface Drawing {
-	tool: DrawingTool;
+	tool: string;
 	points: DrawingPoint[];
 	color?: string;
+	text?: string;
 }
 
 export interface ChartDocumentModel {
@@ -125,7 +123,7 @@ function parseDrawings(value: unknown): Drawing[] {
 			continue;
 		}
 		const candidate = entry as Partial<Drawing>;
-		if (!DRAWING_TOOLS.includes(candidate.tool as DrawingTool) || !Array.isArray(candidate.points)) {
+		if (typeof candidate.tool !== 'string' || !Array.isArray(candidate.points)) {
 			continue;
 		}
 		const points = candidate.points
@@ -133,28 +131,22 @@ function parseDrawings(value: unknown): Drawing[] {
 				typeof point === 'object' && point !== null
 				&& Number.isFinite((point as DrawingPoint).time)
 				&& Number.isFinite((point as DrawingPoint).price))
-			.slice(0, 2);
+			// Freehand strokes can be long; cap them so one runaway drag cannot bloat the file.
+			.slice(0, 2000);
 		if (points.length === 0) {
 			continue;
 		}
-		const drawing: Drawing = { tool: candidate.tool as DrawingTool, points };
+		const drawing: Drawing = { tool: candidate.tool, points };
 		if (typeof candidate.color === 'string') {
 			drawing.color = candidate.color;
+		}
+		if (typeof candidate.text === 'string') {
+			drawing.text = candidate.text.slice(0, 500);
 		}
 		out.push(drawing);
 	}
 	return out.slice(0, 500);
 }
-
-/** Labels for the drawing-tool picker. */
-export const DRAWING_LABELS: readonly { tool: DrawingTool; label: string; description: string }[] = [
-	{ tool: 'trendline', label: 'Trend Line', description: 'drag between two points' },
-	{ tool: 'ray', label: 'Ray', description: 'extends past the second point' },
-	{ tool: 'horizontal', label: 'Horizontal Line', description: 'click a price level' },
-	{ tool: 'vertical', label: 'Vertical Line', description: 'click a time' },
-	{ tool: 'rectangle', label: 'Rectangle', description: 'drag a box' },
-	{ tool: 'fib', label: 'Fibonacci Retracement', description: 'drag across a swing' },
-];
 
 /** Style options come from a user-editable file, so they are bounded on read. */
 function parseStyleOptions(value: unknown): StyleOptions | undefined {
