@@ -139,3 +139,7 @@ body {
 #canvas.drawing {
 	cursor: crosshair;
 }
+
+#canvas.grabbing {
+	cursor: grab;
+}

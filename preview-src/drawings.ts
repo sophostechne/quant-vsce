@@ -31,6 +31,8 @@ const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const FIB_EXTENSIONS = [0, 0.618, 1, 1.618, 2.618, 4.236];
 const FAN_LEVELS = [0.382, 0.5, 0.618];
 const HIT_TOLERANCE = 6;
+/** Grab radius for an anchor handle; larger than the visible dot so it is not fiddly. */
+const HANDLE_RADIUS = 7;
 
 export interface Projection {
 	/** Pixel x for a timestamp, or undefined when it falls outside the loaded series. */
@@ -67,6 +69,21 @@ function project(drawing: Drawing, projection: Projection): ScreenPoint[] {
 		x: projection.xForTimeUnclamped(point.time),
 		y: projection.yForPrice(point.price),
 	}));
+}
+
+/**
+ * Index of the anchor of `drawing` under the cursor, or undefined. Only consulted for the
+ * selected drawing, since handles are only drawn for that one - grabbing an invisible handle
+ * would be indistinguishable from grabbing the line.
+ */
+export function handleAt(drawing: Drawing, x: number, y: number, projection: Projection): number | undefined {
+	const points = project(drawing, projection);
+	for (let i = 0; i < points.length; i++) {
+		if (Math.hypot(x - points[i]!.x, y - points[i]!.y) <= HANDLE_RADIUS) {
+			return i;
+		}
+	}
+	return undefined;
 }
 
 /** Index of the topmost drawing under the cursor, or undefined. */

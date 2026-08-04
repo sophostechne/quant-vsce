@@ -32,5 +32,6 @@
 	"cmd.setChartStyle": "Chart Style",
 	"cmd.setChartScale": "Price Scale",
 	"cmd.draw": "Draw",
-	"cmd.clearDrawings": "Clear Drawings"
+	"cmd.clearDrawings": "Clear Drawings",
+	"cmd.editDrawing": "Edit Selected Drawing"
 }

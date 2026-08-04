@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { ChartStyle, IndicatorSpec, IndicatorType, PriceScale, STYLE_LABELS, describeIndicator, parseModel, writeModel } from './chartModel';
 import { CATEGORY_LABELS, DrawingCategory, TOOL_SPECS } from './drawingCatalogue';
-import { postToChart } from './chartEditor';
+import { postToChart, selectedDrawingIndex } from './chartEditor';
 import { Logger } from '../logger';
 
 /** Numeric config keys a picker can prompt for. */
@@ -43,6 +43,7 @@ export function registerIndicatorCommands(log: Logger): vscode.Disposable {
 		vscode.commands.registerCommand('quant.setChartScale', () => setChartScale(log)),
 		vscode.commands.registerCommand('quant.draw', () => armDrawingTool()),
 		vscode.commands.registerCommand('quant.clearDrawings', () => clearDrawings(log)),
+		vscode.commands.registerCommand('quant.editDrawing', () => editDrawing(log)),
 	);
 }
 
@@ -94,6 +95,80 @@ async function armDrawingTool(): Promise<void> {
 	if (!postToChart(document.uri, { type: 'armTool', tool: picked.tool, text })) {
 		void vscode.window.showWarningMessage(vscode.l10n.t('The chart is not open.'));
 	}
+}
+
+/** Colours offered for a drawing, resolved against the theme when painted. */
+const DRAWING_COLORS = [
+	{ label: 'Default', value: undefined },
+	{ label: 'Blue', value: 'charts.blue' },
+	{ label: 'Green', value: 'charts.green' },
+	{ label: 'Red', value: 'charts.red' },
+	{ label: 'Yellow', value: 'charts.yellow' },
+	{ label: 'Purple', value: 'charts.purple' },
+	{ label: 'Orange', value: 'charts.orange' },
+];
+
+/**
+ * Edits the drawing selected in the chart. Geometry is edited by dragging on the canvas; this
+ * covers the parts that need a keyboard or a list.
+ */
+async function editDrawing(log: Logger): Promise<void> {
+	const document = await activeChartDocument();
+	if (!document) {
+		return;
+	}
+	const index = selectedDrawingIndex(document.uri);
+	const model = parseModel(document, log);
+	const drawing = index === undefined ? undefined : model.drawings[index];
+	if (index === undefined || !drawing) {
+		void vscode.window.showInformationMessage(vscode.l10n.t('Select a drawing on the chart first.'));
+		return;
+	}
+
+	const spec = TOOL_SPECS.find(entry => entry.tool === drawing.tool);
+	const action = await vscode.window.showQuickPick(
+		[
+			...(spec?.needsText ? [{ label: 'Edit Caption', action: 'text' as const }] : []),
+			{ label: 'Change Colour', action: 'color' as const },
+			{ label: 'Delete', action: 'delete' as const },
+		],
+		{ title: spec?.label ?? drawing.tool },
+	);
+	if (!action) {
+		return;
+	}
+
+	let next = [...model.drawings];
+	switch (action.action) {
+		case 'text': {
+			const text = await vscode.window.showInputBox({
+				title: vscode.l10n.t('Caption'),
+				value: drawing.text ?? '',
+			});
+			if (text === undefined) {
+				return;
+			}
+			next[index] = { ...drawing, text };
+			break;
+		}
+		case 'color': {
+			const picked = await vscode.window.showQuickPick(DRAWING_COLORS, { title: vscode.l10n.t('Colour') });
+			if (!picked) {
+				return;
+			}
+			// Undefined means "follow the theme's foreground", so drop the key entirely rather
+			// than storing a literal that would freeze the colour across themes.
+			const { color, ...rest } = drawing;
+			next[index] = picked.value === undefined ? rest : { ...rest, color: picked.value };
+			break;
+		}
+		case 'delete':
+			next = next.filter((_, i) => i !== index);
+			break;
+	}
+
+	await writeModel(document, { ...model, drawings: next });
+	log.info(`Edited drawing ${index} (${drawing.tool}) in ${document.uri.fsPath}`);
 }
 
 function placementHint(placement: string, points: number): string {
