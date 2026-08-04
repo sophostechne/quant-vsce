@@ -9,7 +9,7 @@ import {
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
 import { ChartStyle, StyleOptions, TRANSFORM_STYLES, drawPriceSeries, transformBars } from './chartTypes';
-import { Drawing, Projection, drawDrawings, hitTest } from './drawings';
+import { Drawing, Projection, drawDrawings, handleAt, hitTest } from './drawings';
 import { specFor } from './drawingTools';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
@@ -129,6 +129,8 @@ const MIN_PRICE_FRACTION = 0.20;
 /** Pixels either side of a boundary that count as grabbing it. */
 const DIVIDER_HIT_PX = 6;
 
+/** Pixels per bar from the last paint, used by edit maths outside the render pass. */
+let slotWidth = 1;
 let paneFractions: number[] = [];
 /** Boundaries from the last paint, so hit-testing matches what is on screen. */
 let dividerYs: number[] = [];
@@ -142,6 +144,60 @@ let armedTool: string | undefined;
 let sequencePoints: { time: number; price: number }[] = [];
 /** Caption supplied by the host when the armed tool needs one. */
 let armedText: string | undefined;
+
+/**
+ * An in-progress edit of an existing drawing. `pointIndex` set means one anchor is being
+ * dragged; unset means the whole shape is moving. Anchors are stored as bar indices rather
+ * than timestamps so a move shifts by whole bars and always lands on real ones.
+ */
+let editDrag: {
+	readonly index: number;
+	readonly pointIndex?: number;
+	readonly startX: number;
+	readonly startY: number;
+	readonly origin: readonly { barIndex: number; price: number }[];
+} | undefined;
+
+function beginEdit(index: number, pointIndex: number | undefined, x: number, y: number): void {
+	const drawing = drawings[index];
+	if (!drawing) {
+		return;
+	}
+	editDrag = {
+		index,
+		pointIndex,
+		startX: x,
+		startY: y,
+		origin: drawing.points.map(point => ({
+			barIndex: indexForTime(point.time) ?? 0,
+			price: point.price,
+		})),
+	};
+}
+
+/** Applies the current drag to the edited drawing, in data space. */
+function applyEdit(x: number, y: number): void {
+	if (!editDrag || !projection) {
+		return;
+	}
+	const drawing = drawings[editDrag.index];
+	if (!drawing) {
+		return;
+	}
+	const priceDelta = projection.priceForY(y) - projection.priceForY(editDrag.startY);
+	const barDelta = Math.round((x - editDrag.startX) / Math.max(slotWidth, 0.0001));
+
+	const points = editDrag.origin.map((origin, i) => {
+		// A single-anchor drag moves only that anchor; otherwise every anchor shifts together.
+		if (editDrag!.pointIndex !== undefined && editDrag!.pointIndex !== i) {
+			return drawing.points[i]!;
+		}
+		const barIndex = Math.max(0, Math.min(bars.length - 1, origin.barIndex + barDelta));
+		return { time: bars[barIndex]?.time ?? drawing.points[i]!.time, price: origin.price + priceDelta };
+	});
+
+	drawings = drawings.map((entry, i) => i === editDrag!.index ? { ...entry, points } : entry);
+}
 /** In-progress drag; rendered as a preview until released. */
 let pendingDrawing: Drawing | undefined;
 let selectedDrawing: number | undefined;
@@ -157,6 +213,11 @@ function finishDrawing(drawing: Drawing): void {
 	sequencePoints = [];
 	canvas.classList.remove('drawing');
 	commitDrawings();
+}
+
+/** Lets host-side commands act on whatever is selected here. */
+function postSelection(): void {
+	vscode.postMessage({ type: 'selectionChanged', index: selectedDrawing });
 }
 
 function commitDrawings(): void {
@@ -609,6 +670,7 @@ function render(): void {
 	const price = panes[0]!;
 
 	const slot = plotWidth / visible.length;
+	slotWidth = slot;
 	// Below roughly a pixel per bar the wick and body collapse onto each other; draw a single
 	// hairline per bar instead of pretending there is a candle there.
 	const dense = slot < MIN_SLOT_PX;
@@ -1107,16 +1169,32 @@ canvas.addEventListener('mousedown', event => {
 		return;
 	}
 
-	// Clicking an existing drawing selects it; clicking empty space clears the selection.
 	if (projection) {
+		// A handle of the selected drawing reshapes it. Checked first, because a handle sits
+		// on top of the line it belongs to.
+		if (selectedDrawing !== undefined) {
+			const selected = drawings[selectedDrawing];
+			const handle = selected && handleAt(selected, event.offsetX, event.offsetY, projection);
+			if (handle !== undefined) {
+				beginEdit(selectedDrawing, handle, event.offsetX, event.offsetY);
+				canvas.classList.add('dragging');
+				return;
+			}
+		}
+
+		// Clicking a drawing selects it and begins a move; clicking empty space deselects.
 		const hit = hitTest(drawings, event.offsetX, event.offsetY, projection);
 		if (hit !== undefined) {
 			selectedDrawing = hit;
+			postSelection();
+			beginEdit(hit, undefined, event.offsetX, event.offsetY);
+			canvas.classList.add('dragging');
 			requestRepaint();
 			return;
 		}
 		if (selectedDrawing !== undefined) {
 			selectedDrawing = undefined;
+			postSelection();
 			requestRepaint();
 		}
 	}
@@ -1126,6 +1204,14 @@ canvas.addEventListener('mousedown', event => {
 });
 
 window.addEventListener('mouseup', () => {
+	if (editDrag) {
+		editDrag = undefined;
+		canvas.classList.remove('dragging');
+		// Written on release, so a reshape is one undo step rather than one per mouse move.
+		commitDrawings();
+		return;
+	}
+
 	if (pendingDrawing && armedTool) {
 		const spec = specFor(armedTool);
 		if (spec?.placement === 'drag') {
@@ -1164,6 +1250,12 @@ window.addEventListener('mouseup', () => {
 canvas.addEventListener('mousemove', event => {
 	pointer = { x: event.offsetX, y: event.offsetY };
 
+	if (editDrag) {
+		applyEdit(event.offsetX, event.offsetY);
+		requestRepaint();
+		return;
+	}
+
 	if (dividerDrag) {
 		const plotHeight = canvas.clientHeight - PAD_TOP - PAD_BOTTOM;
 		dragDivider(dividerDrag.index, event.offsetY - dividerDrag.startY, plotHeight, dividerDrag.before);
@@ -1195,8 +1287,16 @@ canvas.addEventListener('mousemove', event => {
 		}
 	}
 
-	// Cursor is the only affordance telling you a boundary is grabbable.
+	// Cursor is the only affordance telling you a boundary or handle is grabbable.
 	canvas.classList.toggle('resizing', dividerAt(event.offsetY) !== undefined);
+	if (selectedDrawing !== undefined && projection) {
+		const selected = drawings[selectedDrawing];
+		const overHandle = selected !== undefined
+			&& handleAt(selected, event.offsetX, event.offsetY, projection) !== undefined;
+		canvas.classList.toggle('grabbing', overHandle);
+	} else {
+		canvas.classList.remove('grabbing');
+	}
 
 	if (dragOrigin && bars.length > 0) {
 		const plotWidth = canvas.clientWidth - PAD_RIGHT;
@@ -1238,6 +1338,7 @@ window.addEventListener('keydown', event => {
 			requestRepaint();
 		} else if (selectedDrawing !== undefined) {
 			selectedDrawing = undefined;
+			postSelection();
 			requestRepaint();
 		}
 		return;
@@ -1245,6 +1346,7 @@ window.addEventListener('keydown', event => {
 	if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawing !== undefined) {
 		drawings = drawings.filter((_, index) => index !== selectedDrawing);
 		selectedDrawing = undefined;
+		postSelection();
 		commitDrawings();
 		requestRepaint();
 	}

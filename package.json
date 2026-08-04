@@ -148,6 +148,12 @@
         "title": "%cmd.clearDrawings%",
         "category": "%cmd.category%",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "quant.editDrawing",
+        "title": "%cmd.editDrawing%",
+        "category": "%cmd.category%",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {
@@ -222,6 +228,11 @@
           "command": "quant.clearDrawings",
           "when": "activeCustomEditorId == quant.chart",
           "group": "1_quant@1"
+        },
+        {
+          "command": "quant.editDrawing",
+          "when": "activeCustomEditorId == quant.chart",
+          "group": "1_quant@0"
         }
       ]
     },

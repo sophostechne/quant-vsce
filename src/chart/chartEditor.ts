@@ -18,6 +18,18 @@ export const CHART_VIEW_TYPE = 'quant.chart';
  */
 const activePanels = new Map<string, vscode.WebviewPanel>();
 
+/**
+ * Which drawing the user has selected in each chart. Lives here rather than in the document:
+ * a selection is transient UI state, and writing it would put cursor movement into the undo
+ * stack and into version control.
+ */
+const selectedDrawings = new Map<string, number>();
+
+/** Index of the drawing selected in the chart for `uri`, if any. */
+export function selectedDrawingIndex(uri: vscode.Uri): number | undefined {
+	return selectedDrawings.get(uri.toString());
+}
+
 /** Posts to the chart for `uri`, if one is open. */
 export function postToChart(uri: vscode.Uri, message: unknown): boolean {
 	const panel = activePanels.get(uri.toString());
@@ -105,11 +117,19 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 		};
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[]; drawings?: Drawing[] }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[]; drawings?: Drawing[]; index?: number }) => {
 			switch (message.type) {
 				case 'ready':
 					pushConfig();
 					await pushHistory();
+					break;
+
+				case 'selectionChanged':
+					if (typeof message.index === 'number') {
+						selectedDrawings.set(document.uri.toString(), message.index);
+					} else {
+						selectedDrawings.delete(document.uri.toString());
+					}
 					break;
 
 				case 'setDrawings':
@@ -204,6 +224,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			// again in another group before this one is disposed.
 			if (activePanels.get(document.uri.toString()) === webviewPanel) {
 				activePanels.delete(document.uri.toString());
+				selectedDrawings.delete(document.uri.toString());
 			}
 			for (const disposable of disposables) {
 				disposable.dispose();
