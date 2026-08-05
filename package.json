@@ -350,7 +350,8 @@
 		"compile-tests": "tsc -p tsconfig.test.json",
 		"watch-tests": "tsc -p tsconfig.test.json --watch",
 		"lint": "eslint src preview-src",
-		"test": "npm run compile-tests && npm run compile && vscode-test"
+		"test": "npm run compile-tests && npm run compile && vscode-test",
+		"sync:fork": "node scripts/sync-fork.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "24.x",
