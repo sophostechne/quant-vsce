@@ -1,18 +1,33 @@
 {
-	"extends": "../tsconfig.base.json",
 	"compilerOptions": {
+		"target": "ES2024",
+		"lib": [
+			"ES2024"
+		],
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"esModuleInterop": true,
+		"strict": true,
+		"noImplicitAny": true,
+		"noImplicitReturns": true,
+		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noUncheckedIndexedAccess": true,
+		"forceConsistentCasingInFileNames": true,
+		"exactOptionalPropertyTypes": false,
+		"useUnknownInCatchVariables": false,
 		"rootDir": "./src",
 		"outDir": "./out",
 		"types": [
-			"node"
-		],
-		"typeRoots": [
-			"./node_modules/@types"
+			"node",
+			"vscode"
 		]
 	},
 	"include": [
-		"src/**/*",
-		"../../src/vscode-dts/vscode.d.ts",
-		"../../src/vscode-dts/vscode.proposed.editorInsets.d.ts"
+		"src/**/*"
+	],
+	"exclude": [
+		"src/test"
 	]
 }

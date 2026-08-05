@@ -3,10 +3,10 @@
 	"displayName": "%displayName%",
 	"description": "%description%",
 	"version": "1.0.0",
-	"publisher": "vscode",
+	"publisher": "sophos",
 	"license": "MIT",
 	"engines": {
-		"vscode": "^1.132.0"
+		"vscode": "^1.90.0"
 	},
 	"capabilities": {
 		"virtualWorkspaces": false,
@@ -15,13 +15,10 @@
 			"description": "%capabilities.untrustedWorkspaces.description%"
 		}
 	},
-	"enabledApiProposals": [
-		"editorInsets"
-	],
 	"categories": [
 		"Other"
 	],
-	"main": "./out/extension",
+	"main": "./out/extension.js",
 	"activationEvents": [
 		"onStartupFinished"
 	],
@@ -342,11 +339,29 @@
 		}
 	},
 	"scripts": {
-		"compile": "npx gulp compile-extension:quant && npm run build-webview",
-		"watch": "npm run build-webview && npx gulp watch-extension:quant",
-		"build-webview": "node ./esbuild.webview.mts"
+		"compile": "node build.mjs",
+		"watch": "node build.mjs --watch",
+		"package": "node build.mjs --production && vsce package --no-dependencies --allow-missing-repository",
+		"typecheck": "tsc -p tsconfig.json --noEmit && tsc -p preview-src/tsconfig.json --noEmit && npm run check:vocabulary",
+		"vscode:prepublish": "node build.mjs --production",
+		"check:vocabulary": "node scripts/check-vocabulary.mjs",
+		"watch:esbuild": "node build.mjs --watch",
+		"watch:tsc": "tsc -p tsconfig.json --noEmit --watch",
+		"compile-tests": "tsc -p tsconfig.test.json",
+		"watch-tests": "tsc -p tsconfig.test.json --watch",
+		"lint": "eslint src preview-src",
+		"test": "npm run compile-tests && npm run compile && vscode-test"
 	},
 	"devDependencies": {
-		"@types/node": "24.x"
+		"@types/node": "24.x",
+		"@types/vscode": "^1.90.0",
+		"@vscode/vsce": "^3.2.0",
+		"esbuild": "^0.24.0",
+		"typescript": "^5.7.0",
+		"@types/mocha": "^10.0.10",
+		"@vscode/test-cli": "^0.0.10",
+		"@vscode/test-electron": "^2.4.1",
+		"eslint": "^9.17.0",
+		"typescript-eslint": "^8.19.0"
 	}
 }

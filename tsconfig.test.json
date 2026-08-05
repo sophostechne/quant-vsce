@@ -1,0 +1,19 @@
+{
+	// Emits loose JavaScript for the test runner, which loads modules rather than a bundle.
+	// Separate from tsconfig.json so the bundler and the compiler never write the same file.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"rootDir": "./src",
+		"outDir": "./out",
+		"sourceMap": true,
+		"types": [
+			"node",
+			"vscode",
+			"mocha"
+		]
+	},
+	"include": [
+		"src/**/*"
+	]
+}

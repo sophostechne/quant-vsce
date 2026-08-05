@@ -1,5 +1,9 @@
-.vscode/**
-out/**/*.map
+# Sources are bundled into out/extension.js and media/*/*.js, so shipping them would double the
+# package for no benefit.
 src/**
+preview-src/**
+build.mjs
 tsconfig.json
-extension.webpack.config.js
+**/tsconfig.json
+.gitignore
+node_modules/**

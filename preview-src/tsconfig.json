@@ -1,15 +1,23 @@
 {
-	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
-		"rootDir": ".",
-		"outDir": "./dist/",
+		"target": "ES2024",
 		"lib": [
 			"ES2024",
 			"DOM",
 			"DOM.Iterable"
 		],
-		"typeRoots": [
-			"../node_modules/@types"
-		]
-	}
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"noImplicitAny": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"forceConsistentCasingInFileNames": true,
+		"rootDir": ".",
+		"noEmit": true,
+		"types": []
+	},
+	"include": [
+		"./**/*.ts"
+	]
 }
