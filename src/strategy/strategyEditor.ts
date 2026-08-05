@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { parseStrategy, STOP_CHOICES, StrategyModel, writeStrategy } from './strategyModel';
-import { StrategyRunner } from './strategyRunner';
+import { EvolveOptions, StrategyRunner } from './strategyRunner';
 import { VOCABULARY } from './vocabulary';
 
 export const STRATEGY_VIEW_TYPE = 'quant.strategy';
@@ -83,13 +83,49 @@ export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 		};
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; model?: StrategyModel }) => {
+		const search = async (options: EvolveOptions) => {
+			running?.cancel();
+			running?.dispose();
+			running = new vscode.CancellationTokenSource();
+			const token = running.token;
+
+			try {
+				await this._runner.evolve(options, event => {
+					if (!token.isCancellationRequested) {
+						void webviewPanel.webview.postMessage({ type: 'search', event });
+					}
+				}, token);
+			} catch (error) {
+				if (!token.isCancellationRequested) {
+					this._log.error(String(error));
+					void webviewPanel.webview.postMessage({ type: 'search-failed', message: String(error) });
+				}
+			}
+		};
+
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: {
+			type: string; model?: StrategyModel; options?: EvolveOptions;
+		}) => {
 			if (message.type === 'ready') {
 				push();
 				return;
 			}
 			if (message.type === 'evaluate') {
 				await evaluate();
+				return;
+			}
+			if (message.type === 'search' && message.options) {
+				await search(message.options);
+				return;
+			}
+			if (message.type === 'cancel') {
+				running?.cancel();
+				return;
+			}
+			if (message.type === 'adopt' && message.model) {
+				// Adopting writes through the document, so replacing the strategy on screen with
+				// a discovered one is a single undo away like any other edit.
+				await writeStrategy(document, message.model);
 				return;
 			}
 			if (message.type === 'update' && message.model) {

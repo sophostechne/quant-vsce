@@ -61,6 +61,54 @@ interface Response {
 	readonly error?: string;
 }
 
+/** Progress from a search, one per generation. */
+export interface Generation {
+	readonly type: 'generation';
+	readonly index: number;
+	readonly viable: number;
+	readonly fitness: number;
+	readonly net_return: number;
+	readonly trades: number;
+}
+
+export interface SearchStart {
+	readonly type: 'start';
+	readonly product: string;
+	readonly timeframe: string;
+	readonly train_bars: number;
+	readonly test_bars: number;
+	readonly train_buy_hold: number;
+	readonly test_buy_hold: number;
+	readonly generations: number;
+}
+
+/**
+ * A strategy the search kept, scored twice.
+ *
+ * `test` comes from bars the search never saw. It is the only one of the two that carries
+ * information about whether the strategy works, and the gap between them is the whole story.
+ */
+export interface Survivor {
+	readonly strategy: unknown;
+	readonly render: string;
+	readonly train: EvaluationResult;
+	readonly test: EvaluationResult | null;
+}
+
+export interface SearchDone {
+	readonly type: 'done';
+	readonly survivors: Survivor[];
+}
+
+export type SearchEvent = SearchStart | Generation | SearchDone | { type: 'error'; error: string };
+
+export interface EvolveOptions {
+	readonly population: number;
+	readonly generations: number;
+	readonly survivors: number;
+	readonly regimes: boolean;
+}
+
 /**
  * Runs the evolutionary engine's evaluator over a strategy document.
  *
@@ -103,6 +151,87 @@ export class StrategyRunner {
 			throw new Error(payload.error ?? vscode.l10n.t('The engine reported no result.'));
 		}
 		return payload as unknown as Evaluation;
+	}
+
+	/**
+	 * Runs the evolutionary search, reporting each generation as it completes.
+	 *
+	 * Streamed rather than awaited whole because a search runs for minutes. A progress bar that
+	 * only knows "started" and "finished" gives the user no basis for deciding whether to wait,
+	 * and no way to see that the population stopped improving ten generations ago.
+	 */
+	async evolve(options: EvolveOptions, onEvent: (event: SearchEvent) => void,
+		token?: vscode.CancellationToken): Promise<void> {
+		const { python, projectRoot } = this._resolvePaths();
+		const config = vscode.workspace.getConfiguration('quant');
+
+		const args = [
+			'-m', 'quant.cli', 'evolve',
+			'--product', config.get<string>('backtest.product', 'BTC-USD'),
+			'--timeframe', config.get<string>('backtest.timeframe', '6h'),
+			'--bars', String(config.get<number>('backtest.bars', 2000)),
+			'--population', String(options.population),
+			'--generations', String(options.generations),
+			'--survivors', String(options.survivors)
+		];
+		if (options.regimes) {
+			args.push('--regimes');
+		}
+
+		this._log.info(`Searching for strategies: ${python} ${args.join(' ')}`);
+		await this._stream(python, args, projectRoot, onEvent, token);
+	}
+
+	/** Spawns `python` and delivers each complete NDJSON line to `onEvent`. */
+	private _stream(python: string, args: string[], cwd: string,
+		onEvent: (event: SearchEvent) => void, token?: vscode.CancellationToken): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const child = spawn(python, args, {
+				cwd,
+				env: { ...process.env, PYTHONPATH: path.join(cwd, 'python') }
+			});
+
+			// Chunks arrive on no particular boundary, so the tail is held back until its
+			// newline turns up rather than being parsed as a truncated object.
+			let pending = '';
+			let stderr = '';
+
+			child.stdout.on('data', chunk => {
+				pending += String(chunk);
+				const lines = pending.split('\n');
+				pending = lines.pop() ?? '';
+				for (const line of lines) {
+					if (!line.trim()) {
+						continue;
+					}
+					try {
+						onEvent(JSON.parse(line) as SearchEvent);
+					} catch {
+						this._log.warn(`Unparseable line from the engine: ${line}`);
+					}
+				}
+			});
+			child.stderr.on('data', chunk => { stderr += String(chunk); });
+
+			const cancellation = token?.onCancellationRequested(() => child.kill());
+
+			child.on('error', error => {
+				cancellation?.dispose();
+				reject(new Error(vscode.l10n.t('Could not start the engine: {0}', String(error))));
+			});
+
+			child.on('close', code => {
+				cancellation?.dispose();
+				if (stderr.trim()) {
+					this._log.warn(stderr.trim());
+				}
+				if (code !== 0 && !token?.isCancellationRequested) {
+					reject(new Error(stderr.trim() || vscode.l10n.t('The search failed.')));
+					return;
+				}
+				resolve();
+			});
+		});
 	}
 
 	private _run(python: string, args: string[], cwd: string, token?: vscode.CancellationToken): Promise<Response> {
