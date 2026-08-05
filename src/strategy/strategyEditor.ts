@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { parseStrategy, STOP_CHOICES, StrategyModel, writeStrategy } from './strategyModel';
-import { EvolveOptions, StrategyRunner } from './strategyRunner';
+import { EvolveOptions, StrategyRunner, WalkOptions } from './strategyRunner';
 import { VOCABULARY } from './vocabulary';
 
 export const STRATEGY_VIEW_TYPE = 'quant.strategy';
@@ -103,8 +103,31 @@ export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 		};
 
+		const walk = async (options: WalkOptions) => {
+			running?.cancel();
+			running?.dispose();
+			running = new vscode.CancellationTokenSource();
+			const token = running.token;
+
+			try {
+				await this._runner.walkForward(options, event => {
+					if (!token.isCancellationRequested) {
+						// Named distinctly from the search's `event`: the two carry different shapes,
+						// and a shared field name let a mismatch here go unnoticed until the panel
+						// silently stayed empty through an entire run.
+						void webviewPanel.webview.postMessage({ type: 'walk', walkEvent: event });
+					}
+				}, token);
+			} catch (error) {
+				if (!token.isCancellationRequested) {
+					this._log.error(String(error));
+					void webviewPanel.webview.postMessage({ type: 'walk-failed', message: String(error) });
+				}
+			}
+		};
+
 		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: {
-			type: string; model?: StrategyModel; options?: EvolveOptions;
+			type: string; model?: StrategyModel; options?: EvolveOptions; walk?: WalkOptions;
 		}) => {
 			if (message.type === 'ready') {
 				push();
@@ -116,6 +139,10 @@ export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 			if (message.type === 'search' && message.options) {
 				await search(message.options);
+				return;
+			}
+			if (message.type === 'walk' && message.walk) {
+				await walk(message.walk);
 				return;
 			}
 			if (message.type === 'cancel') {

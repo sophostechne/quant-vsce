@@ -102,6 +102,44 @@ export interface SearchDone {
 
 export type SearchEvent = SearchStart | Generation | SearchDone | { type: 'error'; error: string };
 
+export interface WalkStart {
+	readonly type: 'start';
+	readonly windows: number;
+	readonly train_bars: number;
+	readonly test_bars: number;
+}
+
+/** One train/test pair: a search was run on the first, and its winner applied to the second. */
+export interface WalkWindow {
+	readonly type: 'window';
+	readonly index: number;
+	readonly from: string;
+	readonly to: string;
+	readonly render: string;
+	readonly train: EvaluationResult;
+	readonly test: EvaluationResult;
+}
+
+export interface WalkDone {
+	readonly type: 'done';
+	/** Out-of-sample return per bar over in-sample. At or below zero, nothing transferred. */
+	readonly efficiency: number;
+	readonly stitched_return: number;
+	readonly stitched_drawdown: number;
+	readonly windows: number;
+	readonly windows_held_up: number;
+}
+
+export type WalkEvent = WalkStart | WalkWindow | WalkDone | { type: 'error'; error: string };
+
+export interface WalkOptions {
+	readonly trainBars: number;
+	readonly testBars: number;
+	readonly population: number;
+	readonly generations: number;
+	readonly regimes: boolean;
+}
+
 export interface EvolveOptions {
 	readonly population: number;
 	readonly generations: number;
@@ -180,6 +218,37 @@ export class StrategyRunner {
 
 		this._log.info(`Searching for strategies: ${python} ${args.join(' ')}`);
 		await this._stream(python, args, projectRoot, onEvent, token);
+	}
+
+	/**
+	 * Walks the search forward across the series, reporting each window as it completes.
+	 *
+	 * This tests the method rather than a strategy: the whole search re-runs in every training
+	 * window and its winner is applied, untouched, to the window after. It is much slower than
+	 * a single search, which is exactly why the windows stream - the first two or three usually
+	 * settle the question.
+	 */
+	async walkForward(options: WalkOptions, onEvent: (event: WalkEvent) => void,
+		token?: vscode.CancellationToken): Promise<void> {
+		const { python, projectRoot } = this._resolvePaths();
+		const config = vscode.workspace.getConfiguration('quant');
+
+		const args = [
+			'-m', 'quant.cli', 'walkforward',
+			'--product', config.get<string>('backtest.product', 'BTC-USD'),
+			'--timeframe', config.get<string>('backtest.timeframe', '6h'),
+			'--bars', String(config.get<number>('backtest.bars', 2000)),
+			'--train-bars', String(options.trainBars),
+			'--test-bars', String(options.testBars),
+			'--population', String(options.population),
+			'--generations', String(options.generations)
+		];
+		if (options.regimes) {
+			args.push('--regimes');
+		}
+
+		this._log.info(`Walking forward: ${python} ${args.join(' ')}`);
+		await this._stream(python, args, projectRoot, onEvent as (event: SearchEvent) => void, token);
 	}
 
 	/** Spawns `python` and delivers each complete NDJSON line to `onEvent`. */
