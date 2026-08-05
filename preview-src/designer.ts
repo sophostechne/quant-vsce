@@ -75,13 +75,27 @@ let evaluation: Evaluation | undefined;
 let evaluationError: string | undefined;
 let evaluating = false;
 
+interface Metrics { trades: number; net_return: number; max_drawdown: number; profit_factor: number; win_rate: number }
+interface Survivor { strategy: StrategyModel; render: string; train: Metrics; test: Metrics | null }
+type SearchEvent =
+	| { type: 'start'; train_bars: number; test_bars: number; train_buy_hold: number; test_buy_hold: number; generations: number }
+	| { type: 'generation'; index: number; viable: number; fitness: number; net_return: number; trades: number }
+	| { type: 'done'; survivors: Survivor[] }
+	| { type: 'error'; error: string };
+
+let searching = false;
+let searchStart: Extract<SearchEvent, { type: 'start' }> | undefined;
+let searchProgress: Extract<SearchEvent, { type: 'generation' }> | undefined;
+let survivors: Survivor[] | undefined;
+let searchError: string | undefined;
+
 /** Path from the model root to a node: which tree, then child indices. */
 type Path = { tree: 'entry' | 'exit'; indices: number[] };
 
 window.addEventListener('message', event => {
 	const message = event.data as {
 		type: string; vocabulary?: Vocabulary; model?: StrategyModel; stops?: (number | null)[];
-		evaluation?: Evaluation; message?: string;
+		evaluation?: Evaluation; message?: string; event?: SearchEvent;
 	};
 	if (message.type === 'strategy' && message.vocabulary && message.model) {
 		vocabulary = message.vocabulary;
@@ -106,6 +120,30 @@ window.addEventListener('message', event => {
 	if (message.type === 'evaluation-failed') {
 		evaluating = false;
 		evaluationError = message.message;
+		render();
+		return;
+	}
+	if (message.type === 'search' && message.event) {
+		const event = message.event;
+		if (event.type === 'start') {
+			searchStart = event;
+			searchProgress = undefined;
+			survivors = undefined;
+		} else if (event.type === 'generation') {
+			searchProgress = event;
+		} else if (event.type === 'done') {
+			survivors = event.survivors;
+			searching = false;
+		} else if (event.type === 'error') {
+			searchError = event.error;
+			searching = false;
+		}
+		render();
+		return;
+	}
+	if (message.type === 'search-failed') {
+		searching = false;
+		searchError = message.message;
 		render();
 	}
 });
@@ -443,6 +481,109 @@ function renderResults(): HTMLElement {
 	return container;
 }
 
+/**
+ * The search panel.
+ *
+ * Every discovered strategy is shown with two returns: the one it achieved on the bars the
+ * search fitted it to, and the one it achieved on bars withheld from the search entirely. Only
+ * the second carries information. Showing the first alone - which is what an evolutionary
+ * strategy finder naturally produces, and what makes them look miraculous - would present the
+ * search's own effort back to the user as a discovery.
+ */
+function renderSearch(): HTMLElement {
+	const container = element('section', 'search');
+
+	const header = element('div', 'results-header');
+	const button = element('button', 'run');
+	button.textContent = searching ? 'Searching...' : 'Find strategies';
+	button.disabled = searching;
+	button.addEventListener('click', () => {
+		searching = true;
+		searchError = undefined;
+		survivors = undefined;
+		searchProgress = undefined;
+		vscode.postMessage({
+			type: 'search',
+			options: { population: 250, generations: 20, survivors: 5, regimes: true }
+		});
+		render();
+	});
+	header.appendChild(button);
+
+	if (searching) {
+		const cancel = element('button', 'run secondary', 'Stop');
+		cancel.addEventListener('click', () => {
+			searching = false;
+			vscode.postMessage({ type: 'cancel' });
+			render();
+		});
+		header.appendChild(cancel);
+	}
+
+	if (searchStart) {
+		header.appendChild(element('span', 'results-scope',
+			`fitted on ${searchStart.train_bars} bars, judged on ${searchStart.test_bars} held back`));
+	}
+	container.appendChild(header);
+
+	if (searchError) {
+		container.appendChild(element('p', 'error', searchError));
+		return container;
+	}
+
+	if (searching && searchProgress && searchStart) {
+		container.appendChild(element('p', 'progress',
+			`Generation ${searchProgress.index + 1} of ${searchStart.generations} - `
+			+ `${searchProgress.viable} of the population meet the criteria, `
+			+ `best ${signed(searchProgress.net_return)} on ${searchProgress.trades} trades.`));
+	}
+
+	if (!survivors) {
+		return container;
+	}
+	if (!survivors.length) {
+		container.appendChild(element('p', 'warn', 'The search found nothing meeting the criteria.'));
+		return container;
+	}
+
+	for (const survivor of survivors) {
+		container.appendChild(renderSurvivor(survivor));
+	}
+	if (searchStart) {
+		container.appendChild(element('p', 'note-block',
+			`Holding the instrument returned ${signed(searchStart.train_buy_hold)} over the fitted bars `
+			+ `and ${signed(searchStart.test_buy_hold)} over the held-back ones. A strategy is only `
+			+ 'worth adopting if the held-back column stands up on its own.'));
+	}
+	return container;
+}
+
+function renderSurvivor(survivor: Survivor): HTMLElement {
+	const card = element('div', 'survivor');
+
+	const rule = element('pre', 'survivor-rule', survivor.render);
+	card.appendChild(rule);
+
+	const columns = element('div', 'survivor-columns');
+	const held = survivor.test;
+	columns.appendChild(metric('fitted to these bars', signed(survivor.train.net_return)));
+	columns.appendChild(metric('held back from the search',
+		held ? signed(held.net_return) : 'no trades',
+		held && held.net_return > 0 ? 'good' : 'bad'));
+	columns.appendChild(metric('trades held back', held ? String(held.trades) : '0'));
+	card.appendChild(columns);
+
+	const adopt = element('button', 'run secondary', 'Edit this strategy');
+	adopt.addEventListener('click', () => {
+		model = survivor.strategy;
+		evaluation = undefined;
+		vscode.postMessage({ type: 'adopt', model: survivor.strategy });
+		render();
+	});
+	card.appendChild(adopt);
+	return card;
+}
+
 function render(): void {
 	if (!vocabulary || !model) {
 		return;
@@ -451,6 +592,7 @@ function render(): void {
 		renderSettings(),
 		section('Enter when', 'the position is opened on the next bar', 'entry'),
 		section('Exit when', 'the position is closed on the next bar', 'exit'),
-		renderResults()
+		renderResults(),
+		renderSearch()
 	);
 }
