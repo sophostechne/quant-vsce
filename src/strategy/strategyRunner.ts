@@ -122,8 +122,13 @@ export interface WalkWindow {
 
 export interface WalkDone {
 	readonly type: 'done';
-	/** Out-of-sample return per bar over in-sample. At or below zero, nothing transferred. */
-	readonly efficiency: number;
+	/**
+	 * Out-of-sample return per bar over in-sample. At or below zero, nothing transferred.
+	 *
+	 * Null when training lost money too, which makes the ratio undefined rather than zero -
+	 * dividing a loss by a loss says nothing about whether an edge generalised.
+	 */
+	readonly efficiency: number | null;
 	readonly stitched_return: number;
 	readonly stitched_drawdown: number;
 	readonly windows: number;

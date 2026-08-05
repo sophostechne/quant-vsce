@@ -104,7 +104,7 @@ interface WalkWindow { index: number; from: string; to: string; render: string; 
 type WalkEvent =
 	| { type: 'start'; windows: number; train_bars: number; test_bars: number }
 	| { type: 'window'; index: number; from: string; to: string; render: string; train: Metrics; test: Metrics }
-	| { type: 'done'; efficiency: number; stitched_return: number; stitched_drawdown: number; windows: number; windows_held_up: number }
+	| { type: 'done'; efficiency: number | null; stitched_return: number; stitched_drawdown: number; windows: number; windows_held_up: number }
 	| { type: 'error'; error: string };
 
 let walking = false;
@@ -687,23 +687,34 @@ function renderWalk(): HTMLElement {
 		row.appendChild(element('span', 'walk-span', `${window.from} to ${window.to}`));
 		row.appendChild(element('span', 'walk-figure',
 			`fitted ${signed(window.train.net_return)}`));
-		const out = element('span',
-			window.test.net_return > 0 ? 'walk-figure good' : 'walk-figure bad',
-			`held back ${signed(window.test.net_return)}`);
-		row.appendChild(out);
-		row.appendChild(element('span', 'walk-span', `${window.test.trades} trades`));
+		// A window with no trades is not a flat result, it is an absence of one, and showing it
+		// as "+0.00%" invites reading it as break-even.
+		const traded = window.test.trades > 0;
+		row.appendChild(element('span',
+			!traded ? 'walk-span' : window.test.net_return > 0 ? 'walk-figure good' : 'walk-figure bad',
+			traded ? `held back ${signed(window.test.net_return)}` : 'never traded'));
+		row.appendChild(element('span', 'walk-span',
+			traded ? `${window.test.trades} trades` : ''));
 		container.appendChild(row);
 	}
 
 	if (walkSummary) {
-		const verdict = walkSummary.efficiency > 0.5 ? undefined : 'warn';
-		container.appendChild(element('p', verdict ? 'note-block warn' : 'note-block',
-			`Efficiency ${walkSummary.efficiency.toFixed(2)}. `
-			+ (walkSummary.efficiency <= 0
+		const efficiency = walkSummary.efficiency;
+		// Undefined is its own verdict, not a bad score. Printing a placeholder number here
+		// would let a reader take "0.00" for a measurement.
+		const headline = efficiency === null
+			? 'Efficiency cannot be measured: the search did not make money in training either, '
+			+ 'so there was no edge whose survival could be judged. '
+			: `Efficiency ${efficiency.toFixed(2)}. `
+			+ (efficiency <= 0
 				? 'At or below zero the search found nothing that carries into unseen data. '
-				: walkSummary.efficiency < 0.5
+				: efficiency < 0.5
 					? 'Below about 0.5 the search is mostly memorising the training window. '
-					: 'Above 0.5 the edge largely survives re-fitting. ')
+					: 'Above 0.5 the edge largely survives re-fitting. ');
+
+		container.appendChild(element('p',
+			efficiency !== null && efficiency > 0.5 ? 'note-block' : 'note-block warn',
+			headline
 			+ `Re-fitting periodically would have returned ${signed(walkSummary.stitched_return)} `
 			+ `with a ${percent(walkSummary.stitched_drawdown)} drawdown, `
 			+ `and ${walkSummary.windows_held_up} of ${walkSummary.windows} windows were profitable.`));
