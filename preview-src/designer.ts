@@ -48,6 +48,21 @@ interface StrategyModel {
 	direction: string;
 }
 
+interface Evaluation {
+	product: string;
+	timeframe: string;
+	bars: number;
+	buy_hold: number;
+	result: {
+		trades: number; net_return: number; max_drawdown: number;
+		profit_factor: number; win_rate: number;
+	};
+	meets_criteria: boolean;
+	reason: string;
+	monte_carlo: { drawdown_p95: number; profitable_share: number; return_p05: number } | null;
+	noise_floor: { beats: number; verdict: string; profitable_share: number } | null;
+}
+
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
 const vscode = acquireVsCodeApi();
@@ -56,6 +71,9 @@ const root = document.getElementById('designer')!;
 let vocabulary: Vocabulary | undefined;
 let model: StrategyModel | undefined;
 let stops: (number | null)[] = [];
+let evaluation: Evaluation | undefined;
+let evaluationError: string | undefined;
+let evaluating = false;
 
 /** Path from the model root to a node: which tree, then child indices. */
 type Path = { tree: 'entry' | 'exit'; indices: number[] };
@@ -63,11 +81,31 @@ type Path = { tree: 'entry' | 'exit'; indices: number[] };
 window.addEventListener('message', event => {
 	const message = event.data as {
 		type: string; vocabulary?: Vocabulary; model?: StrategyModel; stops?: (number | null)[];
+		evaluation?: Evaluation; message?: string;
 	};
 	if (message.type === 'strategy' && message.vocabulary && message.model) {
 		vocabulary = message.vocabulary;
 		model = message.model;
 		stops = message.stops ?? [];
+		render();
+		return;
+	}
+	if (message.type === 'evaluating') {
+		evaluating = true;
+		evaluationError = undefined;
+		render();
+		return;
+	}
+	if (message.type === 'evaluation') {
+		evaluating = false;
+		evaluation = message.evaluation;
+		evaluationError = undefined;
+		render();
+		return;
+	}
+	if (message.type === 'evaluation-failed') {
+		evaluating = false;
+		evaluationError = message.message;
 		render();
 	}
 });
@@ -77,6 +115,10 @@ vscode.postMessage({ type: 'ready' });
 /** Sends the whole model back, which is what puts the change on the document's undo stack. */
 function commit(): void {
 	vscode.postMessage({ type: 'update', model });
+	// Any edit invalidates the last result. Leaving it on screen next to changed rules is how
+	// a number gets attributed to a strategy that never produced it.
+	evaluation = undefined;
+	evaluationError = undefined;
 	render();
 }
 
@@ -320,6 +362,87 @@ function labelled(text: string, control: HTMLElement): HTMLElement {
 	return field;
 }
 
+const percent = (value: number) => `${(value * 100).toFixed(2)}%`;
+const signed = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%`;
+
+function metric(label: string, value: string, tone?: string): HTMLElement {
+	const cell = element('div', tone ? `metric ${tone}` : 'metric');
+	cell.appendChild(element('span', 'metric-value', value));
+	cell.appendChild(element('span', 'metric-label', label));
+	return cell;
+}
+
+/**
+ * The result panel.
+ *
+ * Return is never shown alone. A backtest return with no distribution around it and nothing to
+ * compare it against reads as a finding when it is usually a coincidence, so the resampled
+ * drawdown, the share of resampled runs that made money, and the standing against random
+ * strategies are given the same weight as the headline. Buy-and-hold sits beside the return
+ * for the same reason: a strategy that made 8% where holding made 40% has not found an edge.
+ */
+function renderResults(): HTMLElement {
+	const container = element('section', 'results');
+
+	const header = element('div', 'results-header');
+	const button = element('button', 'run');
+	button.textContent = evaluating ? 'Testing...' : 'Test strategy';
+	button.disabled = evaluating;
+	button.addEventListener('click', () => vscode.postMessage({ type: 'evaluate' }));
+	header.appendChild(button);
+
+	if (evaluation) {
+		header.appendChild(element('span', 'results-scope',
+			`${evaluation.product} ${evaluation.timeframe}, ${evaluation.bars} bars`));
+	}
+	container.appendChild(header);
+
+	if (evaluationError) {
+		container.appendChild(element('p', 'error', evaluationError));
+		return container;
+	}
+	if (!evaluation) {
+		return container;
+	}
+
+	const { result, monte_carlo: mc, noise_floor: floor } = evaluation;
+	const beatsHolding = result.net_return > evaluation.buy_hold;
+
+	const grid = element('div', 'metrics');
+	grid.appendChild(metric('return', signed(result.net_return),
+		result.net_return > 0 ? 'good' : 'bad'));
+	grid.appendChild(metric('buy and hold', signed(evaluation.buy_hold),
+		beatsHolding ? 'good' : 'bad'));
+	grid.appendChild(metric('max drawdown', percent(result.max_drawdown)));
+	grid.appendChild(metric('trades', String(result.trades)));
+	grid.appendChild(metric('win rate', percent(result.win_rate)));
+	grid.appendChild(metric('profit factor', result.profit_factor.toFixed(2)));
+	container.appendChild(grid);
+
+	const notes = element('ul', 'notes');
+	if (!beatsHolding) {
+		notes.appendChild(element('li', 'warn',
+			`Holding ${evaluation.product} over the same bars returned ${signed(evaluation.buy_hold)}. `
+			+ 'This strategy did worse than doing nothing.'));
+	}
+	if (mc) {
+		notes.appendChild(element('li', undefined,
+			`Resampling the trades: drawdown reaches ${percent(mc.drawdown_p95)} in the worst 5% of `
+			+ `orderings, against ${percent(result.max_drawdown)} observed. `
+			+ `${Math.round(mc.profitable_share * 100)}% of resampled runs made money.`));
+	}
+	if (floor) {
+		notes.appendChild(element('li', floor.beats >= 0.95 ? undefined : 'warn',
+			`Against random strategies on the same bars this beats ${Math.round(floor.beats * 100)}% `
+			+ `- ${floor.verdict}.`));
+	}
+	if (!evaluation.meets_criteria) {
+		notes.appendChild(element('li', 'warn', `Does not meet the stated criteria: ${evaluation.reason}.`));
+	}
+	container.appendChild(notes);
+	return container;
+}
+
 function render(): void {
 	if (!vocabulary || !model) {
 		return;
@@ -327,6 +450,7 @@ function render(): void {
 	root.replaceChildren(
 		renderSettings(),
 		section('Enter when', 'the position is opened on the next bar', 'entry'),
-		section('Exit when', 'the position is closed on the next bar', 'exit')
+		section('Exit when', 'the position is closed on the next bar', 'exit'),
+		renderResults()
 	);
 }

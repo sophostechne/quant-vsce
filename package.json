@@ -327,6 +327,16 @@
 					"type": "object",
 					"default": {},
 					"description": "%config.backtest.params%"
+				},
+				"quant.engine.projectPath": {
+					"type": "string",
+					"default": "",
+					"description": "%config.engine.projectPath%"
+				},
+				"quant.engine.pythonPath": {
+					"type": "string",
+					"default": "",
+					"description": "%config.engine.pythonPath%"
 				}
 			}
 		}

@@ -13,6 +13,7 @@ import { BacktestRunner, formatResult } from './strategies/backtestRunner';
 import { StrategiesProvider, StrategyNode } from './strategies/strategiesView';
 import { STRATEGY_VIEW_TYPE, StrategyEditorProvider } from './strategy/strategyEditor';
 import { defaultStrategyContent } from './strategy/strategyModel';
+import { StrategyRunner } from './strategy/strategyRunner';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -37,7 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(ChartEditorProvider.register(context, client, log));
-	context.subscriptions.push(StrategyEditorProvider.register(context, log));
+	context.subscriptions.push(StrategyEditorProvider.register(context, new StrategyRunner(log), log));
 	context.subscriptions.push(registerIndicatorCommands(log));
 	context.subscriptions.push(createStatusBarItem(client));
 
