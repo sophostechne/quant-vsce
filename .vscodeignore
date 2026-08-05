@@ -2,8 +2,17 @@
 # package for no benefit.
 src/**
 preview-src/**
+scripts/**
 build.mjs
-tsconfig.json
-**/tsconfig.json
+eslint.config.mjs
+.vscode-test.mjs
+**/tsconfig*.json
 .gitignore
+.vscode/**
+.vscode-test/**
 node_modules/**
+
+# The test build emits loose modules beside the bundle, and every one of them would otherwise
+# ship: compiling tests once took the package from 11 files to 53.
+out/**
+!out/extension.js
