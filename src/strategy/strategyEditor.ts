@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { parseStrategy, STOP_CHOICES, StrategyModel, writeStrategy } from './strategyModel';
+import { StrategyRunner } from './strategyRunner';
 import { VOCABULARY } from './vocabulary';
 
 export const STRATEGY_VIEW_TYPE = 'quant.strategy';
@@ -21,16 +22,17 @@ export const STRATEGY_VIEW_TYPE = 'quant.strategy';
  */
 export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 
-	static register(context: vscode.ExtensionContext, log: Logger): vscode.Disposable {
+	static register(context: vscode.ExtensionContext, runner: StrategyRunner, log: Logger): vscode.Disposable {
 		return vscode.window.registerCustomEditorProvider(
 			STRATEGY_VIEW_TYPE,
-			new StrategyEditorProvider(context, log),
+			new StrategyEditorProvider(context, runner, log),
 			{ webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: true }
 		);
 	}
 
 	private constructor(
 		private readonly _context: vscode.ExtensionContext,
+		private readonly _runner: StrategyRunner,
 		private readonly _log: Logger
 	) { }
 
@@ -54,9 +56,40 @@ export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 			});
 		};
 
+		// One run at a time per editor. A backtest takes seconds, and a user adjusting a
+		// threshold can outpace it; without this the panel would show whichever run happened to
+		// finish last rather than the one for the strategy on screen.
+		let running: vscode.CancellationTokenSource | undefined;
+		disposables.push({ dispose: () => running?.dispose() });
+
+		const evaluate = async () => {
+			running?.cancel();
+			running?.dispose();
+			running = new vscode.CancellationTokenSource();
+			const token = running.token;
+
+			void webviewPanel.webview.postMessage({ type: 'evaluating' });
+			try {
+				const evaluation = await this._runner.evaluate(document, this._context.storageUri
+					?? this._context.globalStorageUri, token);
+				if (!token.isCancellationRequested) {
+					void webviewPanel.webview.postMessage({ type: 'evaluation', evaluation });
+				}
+			} catch (error) {
+				if (!token.isCancellationRequested) {
+					this._log.error(String(error));
+					void webviewPanel.webview.postMessage({ type: 'evaluation-failed', message: String(error) });
+				}
+			}
+		};
+
 		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; model?: StrategyModel }) => {
 			if (message.type === 'ready') {
 				push();
+				return;
+			}
+			if (message.type === 'evaluate') {
+				await evaluate();
 				return;
 			}
 			if (message.type === 'update' && message.model) {

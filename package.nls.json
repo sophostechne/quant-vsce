@@ -35,5 +35,7 @@
 	"cmd.clearDrawings": "Clear Drawings",
 	"cmd.editDrawing": "Edit Selected Drawing",
 	"customEditor.strategy.displayName": "Strategy Designer",
-	"cmd.newStrategy": "New Strategy"
+	"cmd.newStrategy": "New Strategy",
+	"config.engine.projectPath": "Directory of the quant engine checkout, containing python/quant. Defaults to the first workspace folder.",
+	"config.engine.pythonPath": "Python interpreter to run the engine with. Defaults to .venv/bin/python inside the engine directory."
 }
