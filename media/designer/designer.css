@@ -285,3 +285,35 @@ body {
 .warn {
 	color: var(--vscode-editorWarning-foreground);
 }
+
+/*
+ * One row per window, aligned so the fitted and held-back columns can be read down rather than
+ * compared pair by pair. The pattern across windows is the finding; any single row is noise.
+ */
+.walk-row {
+	display: grid;
+	grid-template-columns: minmax(150px, 1.4fr) 1fr 1fr auto;
+	gap: 10px;
+	align-items: baseline;
+	padding: 5px 0;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	font-variant-numeric: tabular-nums;
+}
+
+.walk-span {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.9em;
+}
+
+.walk-figure.good {
+	color: var(--vscode-charts-green);
+}
+
+.walk-figure.bad {
+	color: var(--vscode-charts-red);
+}
+
+.note-block.warn {
+	border-left-color: var(--vscode-editorWarning-foreground);
+	color: var(--vscode-editorWarning-foreground);
+}

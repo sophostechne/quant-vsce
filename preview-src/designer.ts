@@ -89,13 +89,26 @@ let searchProgress: Extract<SearchEvent, { type: 'generation' }> | undefined;
 let survivors: Survivor[] | undefined;
 let searchError: string | undefined;
 
+interface WalkWindow { index: number; from: string; to: string; render: string; train: Metrics; test: Metrics }
+type WalkEvent =
+	| { type: 'start'; windows: number; train_bars: number; test_bars: number }
+	| { type: 'window'; index: number; from: string; to: string; render: string; train: Metrics; test: Metrics }
+	| { type: 'done'; efficiency: number; stitched_return: number; stitched_drawdown: number; windows: number; windows_held_up: number }
+	| { type: 'error'; error: string };
+
+let walking = false;
+let walkTotal = 0;
+let walkWindows: WalkWindow[] = [];
+let walkSummary: Extract<WalkEvent, { type: 'done' }> | undefined;
+let walkError: string | undefined;
+
 /** Path from the model root to a node: which tree, then child indices. */
 type Path = { tree: 'entry' | 'exit'; indices: number[] };
 
 window.addEventListener('message', event => {
 	const message = event.data as {
 		type: string; vocabulary?: Vocabulary; model?: StrategyModel; stops?: (number | null)[];
-		evaluation?: Evaluation; message?: string; event?: SearchEvent;
+		evaluation?: Evaluation; message?: string; event?: SearchEvent; walkEvent?: WalkEvent;
 	};
 	if (message.type === 'strategy' && message.vocabulary && message.model) {
 		vocabulary = message.vocabulary;
@@ -144,6 +157,30 @@ window.addEventListener('message', event => {
 	if (message.type === 'search-failed') {
 		searching = false;
 		searchError = message.message;
+		render();
+		return;
+	}
+	if (message.type === 'walk' && message.walkEvent) {
+		const event = message.walkEvent;
+		if (event.type === 'start') {
+			walkTotal = event.windows;
+			walkWindows = [];
+			walkSummary = undefined;
+		} else if (event.type === 'window') {
+			walkWindows = [...walkWindows, event];
+		} else if (event.type === 'done') {
+			walkSummary = event;
+			walking = false;
+		} else if (event.type === 'error') {
+			walkError = event.error;
+			walking = false;
+		}
+		render();
+		return;
+	}
+	if (message.type === 'walk-failed') {
+		walking = false;
+		walkError = message.message;
 		render();
 	}
 });
@@ -584,6 +621,83 @@ function renderSurvivor(survivor: Survivor): HTMLElement {
 	return card;
 }
 
+/**
+ * The walk-forward panel.
+ *
+ * Everything above tests a strategy. This tests the *method* that produces them: the whole
+ * search re-runs in each training window and its winner is applied, untouched, to the window
+ * after. Nothing here was chosen using the data it is scored on, which makes the stitched
+ * return the only figure in the designer that corresponds to money.
+ *
+ * Efficiency leads, because it is the number that settles the question. At or below zero the
+ * search found nothing that transfers, however good any individual backtest looked.
+ */
+function renderWalk(): HTMLElement {
+	const container = element('section', 'search');
+
+	const header = element('div', 'results-header');
+	const button = element('button', 'run secondary');
+	button.textContent = walking ? 'Walking forward...' : 'Test the search itself';
+	button.disabled = walking;
+	button.addEventListener('click', () => {
+		walking = true;
+		walkError = undefined;
+		walkWindows = [];
+		walkSummary = undefined;
+		vscode.postMessage({
+			type: 'walk',
+			walk: { trainBars: 1200, testBars: 400, population: 150, generations: 12, regimes: true }
+		});
+		render();
+	});
+	header.appendChild(button);
+	if (walking && walkTotal) {
+		header.appendChild(element('span', 'results-scope',
+			`window ${walkWindows.length} of ${walkTotal}`));
+	}
+	container.appendChild(header);
+
+	if (walkError) {
+		container.appendChild(element('p', 'error', walkError));
+		return container;
+	}
+	if (!walkWindows.length && !walking) {
+		container.appendChild(element('p', 'note-block',
+			'Re-runs the whole search in each training window and applies its winner to the window '
+			+ 'that follows, so nothing is scored on data used to choose it. Slow, and the most '
+			+ 'informative thing here.'));
+		return container;
+	}
+
+	for (const window of walkWindows) {
+		const row = element('div', 'walk-row');
+		row.appendChild(element('span', 'walk-span', `${window.from} to ${window.to}`));
+		row.appendChild(element('span', 'walk-figure',
+			`fitted ${signed(window.train.net_return)}`));
+		const out = element('span',
+			window.test.net_return > 0 ? 'walk-figure good' : 'walk-figure bad',
+			`held back ${signed(window.test.net_return)}`);
+		row.appendChild(out);
+		row.appendChild(element('span', 'walk-span', `${window.test.trades} trades`));
+		container.appendChild(row);
+	}
+
+	if (walkSummary) {
+		const verdict = walkSummary.efficiency > 0.5 ? undefined : 'warn';
+		container.appendChild(element('p', verdict ? 'note-block warn' : 'note-block',
+			`Efficiency ${walkSummary.efficiency.toFixed(2)}. `
+			+ (walkSummary.efficiency <= 0
+				? 'At or below zero the search found nothing that carries into unseen data. '
+				: walkSummary.efficiency < 0.5
+					? 'Below about 0.5 the search is mostly memorising the training window. '
+					: 'Above 0.5 the edge largely survives re-fitting. ')
+			+ `Re-fitting periodically would have returned ${signed(walkSummary.stitched_return)} `
+			+ `with a ${percent(walkSummary.stitched_drawdown)} drawdown, `
+			+ `and ${walkSummary.windows_held_up} of ${walkSummary.windows} windows were profitable.`));
+	}
+	return container;
+}
+
 function render(): void {
 	if (!vocabulary || !model) {
 		return;
@@ -593,6 +707,7 @@ function render(): void {
 		section('Enter when', 'the position is opened on the next bar', 'entry'),
 		section('Exit when', 'the position is closed on the next bar', 'exit'),
 		renderResults(),
-		renderSearch()
+		renderSearch(),
+		renderWalk()
 	);
 }
