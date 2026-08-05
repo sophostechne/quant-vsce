@@ -6,11 +6,13 @@ import path from 'path';
 import { run } from '../esbuild-webview-common.mts';
 
 const srcDir = path.join(import.meta.dirname, 'preview-src');
-const outDir = path.join(import.meta.dirname, 'media', 'chart');
+const outDir = path.join(import.meta.dirname, 'media');
 
+// Keyed by output path, so each webview lands beside its own stylesheet in media/.
 run({
 	entryPoints: {
-		'chart': path.join(srcDir, 'chart.ts'),
+		'chart/chart': path.join(srcDir, 'chart.ts'),
+		'designer/designer': path.join(srcDir, 'designer.ts'),
 	},
 	srcDir,
 	outdir: outDir,

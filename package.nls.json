@@ -33,5 +33,7 @@
 	"cmd.setChartScale": "Price Scale",
 	"cmd.draw": "Draw",
 	"cmd.clearDrawings": "Clear Drawings",
-	"cmd.editDrawing": "Edit Selected Drawing"
+	"cmd.editDrawing": "Edit Selected Drawing",
+	"customEditor.strategy.displayName": "Strategy Designer",
+	"cmd.newStrategy": "New Strategy"
 }

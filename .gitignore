@@ -1,3 +1,5 @@
-media/chart/chart.js
-media/chart/chart.js.map
+# Webview bundles, built from preview-src by esbuild. Matched by shape rather than named one
+# by one, so adding a webview does not also require remembering to ignore its output too.
+media/*/*.js
+media/*/*.js.map
 preview-src/dist/

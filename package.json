@@ -1,320 +1,342 @@
 {
-  "name": "quant",
-  "displayName": "%displayName%",
-  "description": "%description%",
-  "version": "1.0.0",
-  "publisher": "vscode",
-  "license": "MIT",
-  "engines": {
-    "vscode": "^1.132.0"
-  },
-  "capabilities": {
-    "virtualWorkspaces": false,
-    "untrustedWorkspaces": {
-      "supported": false,
-      "description": "%capabilities.untrustedWorkspaces.description%"
-    }
-  },
-  "enabledApiProposals": [
-    "editorInsets"
-  ],
-  "categories": [
-    "Other"
-  ],
-  "main": "./out/extension",
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "quant",
-          "icon": "$(graph)",
-          "title": "%container.title%"
-        }
-      ]
-    },
-    "views": {
-      "quant": [
-        {
-          "id": "quant.watchlist",
-          "name": "%view.watchlist.title%"
-        },
-        {
-          "id": "quant.strategies",
-          "name": "%view.strategies.title%"
-        }
-      ]
-    },
-    "viewsWelcome": [
-      {
-        "view": "quant.watchlist",
-        "contents": "%viewsWelcome.watchlist%"
-      }
-    ],
-    "customEditors": [
-      {
-        "viewType": "quant.chart",
-        "displayName": "%customEditor.chart.displayName%",
-        "selector": [
-          {
-            "filenamePattern": "*.chart"
-          }
-        ],
-        "priority": "default"
-      }
-    ],
-    "languages": [
-      {
-        "id": "json",
-        "extensions": [
-          ".chart"
-        ]
-      }
-    ],
-    "commands": [
-      {
-        "command": "quant.connect",
-        "title": "%cmd.connect%",
-        "category": "%cmd.category%"
-      },
-      {
-        "command": "quant.disconnect",
-        "title": "%cmd.disconnect%",
-        "category": "%cmd.category%"
-      },
-      {
-        "command": "quant.addSymbol",
-        "title": "%cmd.addSymbol%",
-        "category": "%cmd.category%",
-        "icon": "$(add)"
-      },
-      {
-        "command": "quant.removeSymbol",
-        "title": "%cmd.removeSymbol%",
-        "category": "%cmd.category%",
-        "icon": "$(close)"
-      },
-      {
-        "command": "quant.openChart",
-        "title": "%cmd.openChart%",
-        "category": "%cmd.category%",
-        "icon": "$(graph-line)"
-      },
-      {
-        "command": "quant.showLog",
-        "title": "%cmd.showLog%",
-        "category": "%cmd.category%"
-      },
-      {
-        "command": "quant.runBacktest",
-        "title": "%cmd.runBacktest%",
-        "category": "%cmd.category%",
-        "icon": "$(play)"
-      },
-      {
-        "command": "quant.addIndicator",
-        "title": "%cmd.addIndicator%",
-        "category": "%cmd.category%",
-        "icon": "$(add)"
-      },
-      {
-        "command": "quant.removeIndicator",
-        "title": "%cmd.removeIndicator%",
-        "category": "%cmd.category%",
-        "icon": "$(close)"
-      },
-      {
-        "command": "quant.setChartStyle",
-        "title": "%cmd.setChartStyle%",
-        "category": "%cmd.category%",
-        "icon": "$(symbol-color)"
-      },
-      {
-        "command": "quant.setChartScale",
-        "title": "%cmd.setChartScale%",
-        "category": "%cmd.category%",
-        "icon": "$(graph-scatter)"
-      },
-      {
-        "command": "quant.draw",
-        "title": "%cmd.draw%",
-        "category": "%cmd.category%",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "quant.clearDrawings",
-        "title": "%cmd.clearDrawings%",
-        "category": "%cmd.category%",
-        "icon": "$(clear-all)"
-      },
-      {
-        "command": "quant.editDrawing",
-        "title": "%cmd.editDrawing%",
-        "category": "%cmd.category%",
-        "icon": "$(settings-gear)"
-      }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "quant.addSymbol",
-          "when": "view == quant.watchlist",
-          "group": "navigation@1"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "quant.openChart",
-          "when": "view == quant.watchlist && viewItem == quant.symbol",
-          "group": "inline@1"
-        },
-        {
-          "command": "quant.removeSymbol",
-          "when": "view == quant.watchlist && viewItem == quant.symbol",
-          "group": "inline@2"
-        },
-        {
-          "command": "quant.runBacktest",
-          "when": "view == quant.strategies && viewItem == quant.strategy",
-          "group": "inline@1"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "quant.removeSymbol",
-          "when": "never"
-        },
-        {
-          "command": "quant.openChart",
-          "when": "never"
-        }
-      ],
-      "editor/title/run": [
-        {
-          "command": "quant.runBacktest",
-          "when": "resourceExtname == .py && resourceDirname =~ /strategies/",
-          "group": "navigation@1"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "quant.setChartStyle",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "navigation@0"
-        },
-        {
-          "command": "quant.setChartScale",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "navigation@1"
-        },
-        {
-          "command": "quant.draw",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "navigation@2"
-        },
-        {
-          "command": "quant.addIndicator",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "navigation@1"
-        },
-        {
-          "command": "quant.removeIndicator",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "navigation@2"
-        },
-        {
-          "command": "quant.clearDrawings",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "1_quant@1"
-        },
-        {
-          "command": "quant.editDrawing",
-          "when": "activeCustomEditorId == quant.chart",
-          "group": "1_quant@0"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "%config.title%",
-      "properties": {
-        "quant.daemon.host": {
-          "type": "string",
-          "default": "127.0.0.1",
-          "description": "%config.daemon.host%"
-        },
-        "quant.daemon.port": {
-          "type": "number",
-          "default": 8787,
-          "description": "%config.daemon.port%"
-        },
-        "quant.daemon.autoConnect": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.daemon.autoConnect%"
-        },
-        "quant.daemon.allowSimulatedFeed": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.daemon.allowSimulatedFeed%"
-        },
-        "quant.watchlist.refreshIntervalMs": {
-          "type": "number",
-          "default": 250,
-          "minimum": 50,
-          "maximum": 5000,
-          "description": "%config.watchlist.refreshIntervalMs%"
-        },
-        "quant.nautilus.projectPath": {
-          "type": "string",
-          "default": "",
-          "description": "%config.nautilus.projectPath%"
-        },
-        "quant.nautilus.pythonPath": {
-          "type": "string",
-          "default": "",
-          "description": "%config.nautilus.pythonPath%"
-        },
-        "quant.backtest.product": {
-          "type": "string",
-          "default": "BTC-USD",
-          "description": "%config.backtest.product%"
-        },
-        "quant.backtest.timeframe": {
-          "type": "string",
-          "default": "1h",
-          "enum": [
-            "1m",
-            "5m",
-            "15m",
-            "1h",
-            "6h",
-            "1d"
-          ],
-          "description": "%config.backtest.timeframe%"
-        },
-        "quant.backtest.bars": {
-          "type": "number",
-          "default": 1200,
-          "minimum": 50,
-          "maximum": 10000,
-          "description": "%config.backtest.bars%"
-        },
-        "quant.backtest.params": {
-          "type": "object",
-          "default": {},
-          "description": "%config.backtest.params%"
-        }
-      }
-    }
-  },
-  "scripts": {
-    "compile": "npx gulp compile-extension:quant && npm run build-webview",
-    "watch": "npm run build-webview && npx gulp watch-extension:quant",
-    "build-webview": "node ./esbuild.webview.mts"
-  },
-  "devDependencies": {
-    "@types/node": "24.x"
-  }
+	"name": "quant",
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"version": "1.0.0",
+	"publisher": "vscode",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.132.0"
+	},
+	"capabilities": {
+		"virtualWorkspaces": false,
+		"untrustedWorkspaces": {
+			"supported": false,
+			"description": "%capabilities.untrustedWorkspaces.description%"
+		}
+	},
+	"enabledApiProposals": [
+		"editorInsets"
+	],
+	"categories": [
+		"Other"
+	],
+	"main": "./out/extension",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "quant",
+					"icon": "$(graph)",
+					"title": "%container.title%"
+				}
+			]
+		},
+		"views": {
+			"quant": [
+				{
+					"id": "quant.watchlist",
+					"name": "%view.watchlist.title%"
+				},
+				{
+					"id": "quant.strategies",
+					"name": "%view.strategies.title%"
+				}
+			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "quant.watchlist",
+				"contents": "%viewsWelcome.watchlist%"
+			}
+		],
+		"customEditors": [
+			{
+				"viewType": "quant.chart",
+				"displayName": "%customEditor.chart.displayName%",
+				"selector": [
+					{
+						"filenamePattern": "*.chart"
+					}
+				],
+				"priority": "default"
+			},
+			{
+				"viewType": "quant.strategy",
+				"displayName": "%customEditor.strategy.displayName%",
+				"selector": [
+					{
+						"filenamePattern": "*.strategy"
+					}
+				],
+				"priority": "default"
+			}
+		],
+		"languages": [
+			{
+				"id": "json",
+				"extensions": [
+					".chart",
+					".strategy"
+				]
+			}
+		],
+		"commands": [
+			{
+				"command": "quant.connect",
+				"title": "%cmd.connect%",
+				"category": "%cmd.category%"
+			},
+			{
+				"command": "quant.disconnect",
+				"title": "%cmd.disconnect%",
+				"category": "%cmd.category%"
+			},
+			{
+				"command": "quant.addSymbol",
+				"title": "%cmd.addSymbol%",
+				"category": "%cmd.category%",
+				"icon": "$(add)"
+			},
+			{
+				"command": "quant.removeSymbol",
+				"title": "%cmd.removeSymbol%",
+				"category": "%cmd.category%",
+				"icon": "$(close)"
+			},
+			{
+				"command": "quant.openChart",
+				"title": "%cmd.openChart%",
+				"category": "%cmd.category%",
+				"icon": "$(graph-line)"
+			},
+			{
+				"command": "quant.showLog",
+				"title": "%cmd.showLog%",
+				"category": "%cmd.category%"
+			},
+			{
+				"command": "quant.runBacktest",
+				"title": "%cmd.runBacktest%",
+				"category": "%cmd.category%",
+				"icon": "$(play)"
+			},
+			{
+				"command": "quant.addIndicator",
+				"title": "%cmd.addIndicator%",
+				"category": "%cmd.category%",
+				"icon": "$(add)"
+			},
+			{
+				"command": "quant.removeIndicator",
+				"title": "%cmd.removeIndicator%",
+				"category": "%cmd.category%",
+				"icon": "$(close)"
+			},
+			{
+				"command": "quant.setChartStyle",
+				"title": "%cmd.setChartStyle%",
+				"category": "%cmd.category%",
+				"icon": "$(symbol-color)"
+			},
+			{
+				"command": "quant.setChartScale",
+				"title": "%cmd.setChartScale%",
+				"category": "%cmd.category%",
+				"icon": "$(graph-scatter)"
+			},
+			{
+				"command": "quant.draw",
+				"title": "%cmd.draw%",
+				"category": "%cmd.category%",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "quant.clearDrawings",
+				"title": "%cmd.clearDrawings%",
+				"category": "%cmd.category%",
+				"icon": "$(clear-all)"
+			},
+			{
+				"command": "quant.editDrawing",
+				"title": "%cmd.editDrawing%",
+				"category": "%cmd.category%",
+				"icon": "$(settings-gear)"
+			},
+			{
+				"command": "quant.newStrategy",
+				"title": "%cmd.newStrategy%",
+				"category": "%cmd.category%",
+				"icon": "$(new-file)"
+			}
+		],
+		"menus": {
+			"view/title": [
+				{
+					"command": "quant.addSymbol",
+					"when": "view == quant.watchlist",
+					"group": "navigation@1"
+				},
+				{
+					"command": "quant.newStrategy",
+					"when": "view == quant.strategies",
+					"group": "navigation@1"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "quant.openChart",
+					"when": "view == quant.watchlist && viewItem == quant.symbol",
+					"group": "inline@1"
+				},
+				{
+					"command": "quant.removeSymbol",
+					"when": "view == quant.watchlist && viewItem == quant.symbol",
+					"group": "inline@2"
+				},
+				{
+					"command": "quant.runBacktest",
+					"when": "view == quant.strategies && viewItem == quant.strategy",
+					"group": "inline@1"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "quant.removeSymbol",
+					"when": "never"
+				},
+				{
+					"command": "quant.openChart",
+					"when": "never"
+				}
+			],
+			"editor/title/run": [
+				{
+					"command": "quant.runBacktest",
+					"when": "resourceExtname == .py && resourceDirname =~ /strategies/",
+					"group": "navigation@1"
+				}
+			],
+			"editor/title": [
+				{
+					"command": "quant.setChartStyle",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@0"
+				},
+				{
+					"command": "quant.setChartScale",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@1"
+				},
+				{
+					"command": "quant.draw",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@2"
+				},
+				{
+					"command": "quant.addIndicator",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@1"
+				},
+				{
+					"command": "quant.removeIndicator",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@2"
+				},
+				{
+					"command": "quant.clearDrawings",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "1_quant@1"
+				},
+				{
+					"command": "quant.editDrawing",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "1_quant@0"
+				}
+			]
+		},
+		"configuration": {
+			"title": "%config.title%",
+			"properties": {
+				"quant.daemon.host": {
+					"type": "string",
+					"default": "127.0.0.1",
+					"description": "%config.daemon.host%"
+				},
+				"quant.daemon.port": {
+					"type": "number",
+					"default": 8787,
+					"description": "%config.daemon.port%"
+				},
+				"quant.daemon.autoConnect": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.daemon.autoConnect%"
+				},
+				"quant.daemon.allowSimulatedFeed": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.daemon.allowSimulatedFeed%"
+				},
+				"quant.watchlist.refreshIntervalMs": {
+					"type": "number",
+					"default": 250,
+					"minimum": 50,
+					"maximum": 5000,
+					"description": "%config.watchlist.refreshIntervalMs%"
+				},
+				"quant.nautilus.projectPath": {
+					"type": "string",
+					"default": "",
+					"description": "%config.nautilus.projectPath%"
+				},
+				"quant.nautilus.pythonPath": {
+					"type": "string",
+					"default": "",
+					"description": "%config.nautilus.pythonPath%"
+				},
+				"quant.backtest.product": {
+					"type": "string",
+					"default": "BTC-USD",
+					"description": "%config.backtest.product%"
+				},
+				"quant.backtest.timeframe": {
+					"type": "string",
+					"default": "1h",
+					"enum": [
+						"1m",
+						"5m",
+						"15m",
+						"1h",
+						"6h",
+						"1d"
+					],
+					"description": "%config.backtest.timeframe%"
+				},
+				"quant.backtest.bars": {
+					"type": "number",
+					"default": 1200,
+					"minimum": 50,
+					"maximum": 10000,
+					"description": "%config.backtest.bars%"
+				},
+				"quant.backtest.params": {
+					"type": "object",
+					"default": {},
+					"description": "%config.backtest.params%"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"compile": "npx gulp compile-extension:quant && npm run build-webview",
+		"watch": "npm run build-webview && npx gulp watch-extension:quant",
+		"build-webview": "node ./esbuild.webview.mts"
+	},
+	"devDependencies": {
+		"@types/node": "24.x"
+	}
 }
