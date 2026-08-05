@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
+import { resolveLabels } from './labels';
 import { parseStrategy, STOP_CHOICES, StrategyModel, writeStrategy } from './strategyModel';
 import { EvolveOptions, StrategyRunner, WalkOptions } from './strategyRunner';
 import { VOCABULARY } from './vocabulary';
@@ -51,6 +52,7 @@ export class StrategyEditorProvider implements vscode.CustomTextEditorProvider {
 			void webviewPanel.webview.postMessage({
 				type: 'strategy',
 				vocabulary: VOCABULARY,
+				labels: resolveLabels(),
 				stops: STOP_CHOICES,
 				model: parseStrategy(document, this._log)
 			});

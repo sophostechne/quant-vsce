@@ -6,17 +6,21 @@
 // Generated from quant/genome/vocabulary.py - do not edit by hand.
 // Regenerate with: python -m quant.genome.vocabulary > <this file>
 //
-// The `label` fields are shown in the designer and are not localized. They originate in the
-// engine, which has no access to the extension's string bundle, so translating them needs a
-// decision about where the vocabulary's display names should live - see the strategy designer
-// notes. Until then they are English, which is a real gap rather than an oversight.
+// Structure only. Display names live in labels.ts, where they can be localized - see OpName.
 
 /** What a slot in the strategy tree evaluates to. */
 export type NodeType = 'price' | 'osc' | 'level' | 'bool';
 
+/**
+ * Every operation the engine can evaluate.
+ *
+ * Exported as a union so the editor's label table can be typed `Record<OpName, string>`: adding
+ * an operation to the engine then fails to compile here until it has been given a name, rather
+ * than reaching a picker as a raw identifier like `price_gt`.
+ */
+export type OpName = 'and' | 'close' | 'ema' | 'high' | 'highest' | 'level' | 'low' | 'lowest' | 'not' | 'open' | 'or' | 'osc_cross_above' | 'osc_cross_below' | 'osc_gt' | 'osc_lt' | 'osc_sma' | 'pctrank' | 'price_cross_above' | 'price_cross_below' | 'price_gt' | 'price_lt' | 'rsi' | 'sma' | 'stoch' | 'vol_rank';
+
 export interface OpSignature {
-	/** How the operation is written in the designer. */
-	readonly label: string;
 	readonly returns: NodeType;
 	/** The type of each child slot, in order. */
 	readonly accepts: readonly NodeType[];
@@ -25,7 +29,7 @@ export interface OpSignature {
 }
 
 export interface Vocabulary {
-	readonly types: Readonly<Record<NodeType, string>>;
+	readonly types: readonly NodeType[];
 	readonly ops: Readonly<Record<string, OpSignature>>;
 	/** Operations usable as leaves, per type. */
 	readonly terminals: Readonly<Record<NodeType, readonly string[]>>;
@@ -90,13 +94,11 @@ export const VOCABULARY: Vocabulary = {
 				'bool',
 				'bool'
 			],
-			label: 'and',
 			period: null,
 			returns: 'bool'
 		},
 		close: {
 			accepts: [],
-			label: 'Close',
 			period: null,
 			returns: 'price'
 		},
@@ -104,7 +106,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'Exp. Moving Average',
 			period: [
 				2,
 				200
@@ -113,7 +114,6 @@ export const VOCABULARY: Vocabulary = {
 		},
 		high: {
 			accepts: [],
-			label: 'High',
 			period: null,
 			returns: 'price'
 		},
@@ -121,7 +121,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'Highest',
 			period: [
 				2,
 				100
@@ -130,13 +129,11 @@ export const VOCABULARY: Vocabulary = {
 		},
 		level: {
 			accepts: [],
-			label: 'Level',
 			period: null,
 			returns: 'level'
 		},
 		low: {
 			accepts: [],
-			label: 'Low',
 			period: null,
 			returns: 'price'
 		},
@@ -144,7 +141,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'Lowest',
 			period: [
 				2,
 				100
@@ -155,13 +151,11 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'bool'
 			],
-			label: 'not',
 			period: null,
 			returns: 'bool'
 		},
 		open: {
 			accepts: [],
-			label: 'Open',
 			period: null,
 			returns: 'price'
 		},
@@ -170,7 +164,6 @@ export const VOCABULARY: Vocabulary = {
 				'bool',
 				'bool'
 			],
-			label: 'or',
 			period: null,
 			returns: 'bool'
 		},
@@ -179,7 +172,6 @@ export const VOCABULARY: Vocabulary = {
 				'osc',
 				'level'
 			],
-			label: 'crosses above',
 			period: null,
 			returns: 'bool'
 		},
@@ -188,7 +180,6 @@ export const VOCABULARY: Vocabulary = {
 				'osc',
 				'level'
 			],
-			label: 'crosses below',
 			period: null,
 			returns: 'bool'
 		},
@@ -197,7 +188,6 @@ export const VOCABULARY: Vocabulary = {
 				'osc',
 				'level'
 			],
-			label: 'is above',
 			period: null,
 			returns: 'bool'
 		},
@@ -206,7 +196,6 @@ export const VOCABULARY: Vocabulary = {
 				'osc',
 				'level'
 			],
-			label: 'is below',
 			period: null,
 			returns: 'bool'
 		},
@@ -214,7 +203,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'osc'
 			],
-			label: 'Smoothed',
 			period: [
 				2,
 				50
@@ -225,7 +213,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'Percentile Rank',
 			period: [
 				10,
 				200
@@ -237,7 +224,6 @@ export const VOCABULARY: Vocabulary = {
 				'price',
 				'price'
 			],
-			label: 'crosses above',
 			period: null,
 			returns: 'bool'
 		},
@@ -246,7 +232,6 @@ export const VOCABULARY: Vocabulary = {
 				'price',
 				'price'
 			],
-			label: 'crosses below',
 			period: null,
 			returns: 'bool'
 		},
@@ -255,7 +240,6 @@ export const VOCABULARY: Vocabulary = {
 				'price',
 				'price'
 			],
-			label: 'is above',
 			period: null,
 			returns: 'bool'
 		},
@@ -264,7 +248,6 @@ export const VOCABULARY: Vocabulary = {
 				'price',
 				'price'
 			],
-			label: 'is below',
 			period: null,
 			returns: 'bool'
 		},
@@ -272,7 +255,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'RSI',
 			period: [
 				2,
 				50
@@ -283,7 +265,6 @@ export const VOCABULARY: Vocabulary = {
 			accepts: [
 				'price'
 			],
-			label: 'Moving Average',
 			period: [
 				2,
 				200
@@ -292,7 +273,6 @@ export const VOCABULARY: Vocabulary = {
 		},
 		stoch: {
 			accepts: [],
-			label: 'Stochastic',
 			period: [
 				5,
 				50
@@ -301,7 +281,6 @@ export const VOCABULARY: Vocabulary = {
 		},
 		vol_rank: {
 			accepts: [],
-			label: 'Volatility Rank',
 			period: [
 				20,
 				200
@@ -325,10 +304,10 @@ export const VOCABULARY: Vocabulary = {
 			'low'
 		]
 	},
-	types: {
-		bool: 'condition',
-		level: 'threshold',
-		osc: 'indicator',
-		price: 'price'
-	}
+	types: [
+		'price',
+		'osc',
+		'level',
+		'bool'
+	]
 };

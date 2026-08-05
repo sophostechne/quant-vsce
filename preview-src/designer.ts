@@ -19,14 +19,24 @@
 type NodeType = 'price' | 'osc' | 'level' | 'bool';
 
 interface OpSignature {
-	label: string;
 	returns: NodeType;
 	accepts: NodeType[];
 	period: [number, number] | null;
 }
 
+/**
+ * Display names, resolved for the current locale by the extension.
+ *
+ * Sent alongside the vocabulary rather than baked in, because a webview has no access to the
+ * workbench's string bundle - it can render a translation but cannot look one up.
+ */
+interface Labels {
+	ops: Record<string, string>;
+	types: Record<string, string>;
+}
+
 interface Vocabulary {
-	types: Record<NodeType, string>;
+	types: NodeType[];
 	ops: Record<string, OpSignature>;
 	terminals: Record<NodeType, string[]>;
 	functions: Record<NodeType, string[]>;
@@ -69,6 +79,7 @@ const vscode = acquireVsCodeApi();
 const root = document.getElementById('designer')!;
 
 let vocabulary: Vocabulary | undefined;
+let labels: Labels | undefined;
 let model: StrategyModel | undefined;
 let stops: (number | null)[] = [];
 let evaluation: Evaluation | undefined;
@@ -108,10 +119,12 @@ type Path = { tree: 'entry' | 'exit'; indices: number[] };
 window.addEventListener('message', event => {
 	const message = event.data as {
 		type: string; vocabulary?: Vocabulary; model?: StrategyModel; stops?: (number | null)[];
-		evaluation?: Evaluation; message?: string; event?: SearchEvent; walkEvent?: WalkEvent;
+		labels?: Labels; evaluation?: Evaluation; message?: string;
+		event?: SearchEvent; walkEvent?: WalkEvent;
 	};
 	if (message.type === 'strategy' && message.vocabulary && message.model) {
 		vocabulary = message.vocabulary;
+		labels = message.labels;
 		model = message.model;
 		stops = message.stops ?? [];
 		render();
@@ -295,7 +308,7 @@ function opPicker(path: Path, want: NodeType, current: string): HTMLSelectElemen
 		for (const op of ops) {
 			const option = element('option');
 			option.value = op;
-			option.textContent = vocabulary!.ops[op].label;
+			option.textContent = labels?.ops[op] ?? op;
 			option.selected = op === current;
 			group.appendChild(option);
 		}
