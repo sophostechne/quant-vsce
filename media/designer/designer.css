@@ -1,0 +1,126 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
+}
+
+.designer {
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+	max-width: 900px;
+	padding: 20px;
+}
+
+/* Settings sit above the rules because direction changes what the rules mean: the same */
+/* condition entered long or short is two different strategies. */
+.settings {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 18px;
+	padding-bottom: 16px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.field-label {
+	font-size: 0.9em;
+	color: var(--vscode-descriptionForeground);
+}
+
+.rule-title {
+	margin: 0 0 10px;
+	font-size: 1.05em;
+	font-weight: 600;
+}
+
+.hint {
+	margin-left: 8px;
+	font-size: 0.82em;
+	font-weight: 400;
+	color: var(--vscode-descriptionForeground);
+}
+
+/*
+ * A condition lays out as a sentence, so a simple rule occupies one line and reads left to
+ * right the way a trader would say it. Wrapping is allowed because a nested rule can outgrow
+ * the pane, and truncating a condition would hide part of what the strategy does.
+ */
+.node {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.node.value {
+	/* Operands read as one phrase, so their parts sit tighter than the clauses around them. */
+	gap: 4px;
+}
+
+/*
+ * Nesting is shown only where a condition contains another condition. Indenting every operand
+ * would turn a one-line rule into a staircase and bury the structure that actually matters.
+ */
+.condition > .condition {
+	padding-left: 12px;
+	border-left: 2px solid var(--vscode-panel-border);
+}
+
+.op,
+.direction,
+.stop {
+	font-family: inherit;
+	font-size: inherit;
+	color: var(--vscode-dropdown-foreground);
+	background: var(--vscode-dropdown-background);
+	border: 1px solid var(--vscode-dropdown-border);
+	border-radius: 4px;
+	padding: 3px 6px;
+}
+
+/* Operators carry the meaning of a rule, so they are the one element given emphasis. */
+.condition > .op {
+	color: var(--vscode-textLink-foreground);
+	background: transparent;
+	border-color: transparent;
+	font-weight: 600;
+}
+
+.condition > .op:hover {
+	background: var(--vscode-dropdown-background);
+	border-color: var(--vscode-dropdown-border);
+}
+
+.number {
+	width: 68px;
+	font-family: inherit;
+	font-size: inherit;
+	color: var(--vscode-input-foreground);
+	background: var(--vscode-input-background);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 4px;
+	padding: 3px 6px;
+}
+
+.op:focus,
+.number:focus,
+.direction:focus,
+.stop:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}

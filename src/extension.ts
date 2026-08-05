@@ -11,6 +11,8 @@ import { ConnectionState, MarketDataClient } from './marketData/client';
 import { registerIndicatorCommands } from './chart/indicatorCommands';
 import { BacktestRunner, formatResult } from './strategies/backtestRunner';
 import { StrategiesProvider, StrategyNode } from './strategies/strategiesView';
+import { STRATEGY_VIEW_TYPE, StrategyEditorProvider } from './strategy/strategyEditor';
+import { defaultStrategyContent } from './strategy/strategyModel';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -35,6 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(ChartEditorProvider.register(context, client, log));
+	context.subscriptions.push(StrategyEditorProvider.register(context, log));
 	context.subscriptions.push(registerIndicatorCommands(log));
 	context.subscriptions.push(createStatusBarItem(client));
 
@@ -42,6 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('quant.connect', () => client.connect()),
 		vscode.commands.registerCommand('quant.disconnect', () => client.disconnect()),
 		vscode.commands.registerCommand('quant.showLog', () => log.show()),
+		vscode.commands.registerCommand('quant.newStrategy', () => openNewStrategy()),
 
 		vscode.commands.registerCommand('quant.addSymbol', async () => {
 			const symbol = await vscode.window.showInputBox({
@@ -148,6 +152,23 @@ async function openChart(symbol: string): Promise<void> {
 		await vscode.workspace.applyEdit(edit);
 	}
 	await vscode.commands.executeCommand('vscode.openWith', uri, CHART_VIEW_TYPE);
+}
+
+/**
+ * Opens an untitled `.strategy` file in the designer.
+ *
+ * Untitled rather than written to disk, so a strategy the user abandons leaves nothing behind
+ * and the save prompt is the ordinary one for a new file.
+ */
+async function openNewStrategy(): Promise<void> {
+	const uri = vscode.Uri.parse('untitled:strategy.strategy');
+	const document = await vscode.workspace.openTextDocument(uri);
+	if (document.getText().trim().length === 0) {
+		const edit = new vscode.WorkspaceEdit();
+		edit.insert(uri, new vscode.Position(0, 0), defaultStrategyContent());
+		await vscode.workspace.applyEdit(edit);
+	}
+	await vscode.commands.executeCommand('vscode.openWith', uri, STRATEGY_VIEW_TYPE);
 }
 
 function createStatusBarItem(client: MarketDataClient): vscode.Disposable {
