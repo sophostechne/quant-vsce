@@ -145,14 +145,21 @@ async function runBacktest(runner: BacktestRunner, log: Logger, strategyFile: vs
  * workspace is what turns a layout into a versioned artifact.
  */
 async function openChart(symbol: string): Promise<void> {
-	const uri = vscode.Uri.parse(`untitled:${symbol}.chart`);
-	const document = await vscode.workspace.openTextDocument(uri);
-	if (document.getText().trim().length === 0) {
-		const edit = new vscode.WorkspaceEdit();
-		edit.insert(uri, new vscode.Position(0, 0), defaultChartContent(symbol));
-		await vscode.workspace.applyEdit(edit);
+	const folder = vscode.workspace.workspaceFolders?.[0];
+	const fileName = `${symbol}.chart`;
+
+	// A saved layout for this symbol is one the user built and kept, so open that rather than
+	// shadowing it with a fresh untitled chart claiming the same name.
+	if (folder) {
+		const saved = vscode.Uri.joinPath(folder.uri, fileName);
+		if (await exists(saved)) {
+			await vscode.commands.executeCommand('vscode.openWith', saved, CHART_VIEW_TYPE);
+			return;
+		}
 	}
-	await vscode.commands.executeCommand('vscode.openWith', uri, CHART_VIEW_TYPE);
+
+	const document = await openUntitled(fileName, () => defaultChartContent(symbol));
+	await vscode.commands.executeCommand('vscode.openWith', document.uri, CHART_VIEW_TYPE);
 }
 
 /**
@@ -162,14 +169,60 @@ async function openChart(symbol: string): Promise<void> {
  * and the save prompt is the ordinary one for a new file.
  */
 async function openNewStrategy(): Promise<void> {
-	const uri = vscode.Uri.parse('untitled:strategy.strategy');
+	const folder = vscode.workspace.workspaceFolders?.[0];
+	// New means new. A workspace already holding strategy.strategy gets strategy-2.strategy, so
+	// the command keeps working instead of failing on a name the user cannot see or choose.
+	const fileName = folder ? await unusedName(folder.uri, 'strategy', '.strategy') : 'strategy.strategy';
+
+	const document = await openUntitled(fileName, defaultStrategyContent);
+	await vscode.commands.executeCommand('vscode.openWith', document.uri, STRATEGY_VIEW_TYPE);
+}
+
+async function exists(uri: vscode.Uri): Promise<boolean> {
+	try {
+		await vscode.workspace.fs.stat(uri);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The first name in the `base.ext`, `base-2.ext`, … series that no file in `folder` holds. */
+async function unusedName(folder: vscode.Uri, base: string, extension: string): Promise<string> {
+	for (let n = 1; ; n++) {
+		const candidate = n === 1 ? `${base}${extension}` : `${base}-${n}${extension}`;
+		if (!await exists(vscode.Uri.joinPath(folder, candidate))) {
+			return candidate;
+		}
+	}
+}
+
+/**
+ * Opens an untitled document called `fileName`, seeded with `content` if it is not already open.
+ *
+ * The path on an `untitled:` URI is the path Save writes to, and it writes there directly rather
+ * than asking. A bare file name is a *relative* path, which resolves against the filesystem
+ * root - so saving an untitled chart attempted `/BABA.chart` and failed on permissions, naming a
+ * location the user had never chosen.
+ *
+ * Anchoring the name to the workspace folder makes Save land where a saved chart belongs. With
+ * no folder open there is nothing to anchor to, so the document is created without an associated
+ * path at all and Save asks where to put it, which is the right question in that case.
+ */
+async function openUntitled(fileName: string, content: () => string): Promise<vscode.TextDocument> {
+	const folder = vscode.workspace.workspaceFolders?.[0];
+	if (!folder) {
+		return vscode.workspace.openTextDocument({ language: 'json', content: content() });
+	}
+
+	const uri = vscode.Uri.joinPath(folder.uri, fileName).with({ scheme: 'untitled' });
 	const document = await vscode.workspace.openTextDocument(uri);
 	if (document.getText().trim().length === 0) {
 		const edit = new vscode.WorkspaceEdit();
-		edit.insert(uri, new vscode.Position(0, 0), defaultStrategyContent());
+		edit.insert(uri, new vscode.Position(0, 0), content());
 		await vscode.workspace.applyEdit(edit);
 	}
-	await vscode.commands.executeCommand('vscode.openWith', uri, STRATEGY_VIEW_TYPE);
+	return document;
 }
 
 function createStatusBarItem(client: MarketDataClient): vscode.Disposable {
