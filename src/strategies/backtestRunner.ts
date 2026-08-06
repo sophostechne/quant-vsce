@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
@@ -70,6 +71,14 @@ export class BacktestRunner {
 
 		const configuredPython = config.get<string>('nautilus.pythonPath', '').trim();
 		const python = configuredPython || path.join(projectRoot, '.venv', 'bin', 'python');
+
+		// Checked here so a missing interpreter is named as such, rather than surfacing later as a
+		// bare spawn ENOENT quoting a default path the user never chose.
+		if (!fs.existsSync(python)) {
+			throw new Error(configuredPython
+				? vscode.l10n.t('No Python interpreter at "{0}". Check "quant.nautilus.pythonPath".', python)
+				: vscode.l10n.t('No Python interpreter at "{0}". Set "quant.nautilus.pythonPath" to the interpreter Nautilus is installed in, or "quant.nautilus.projectPath" to the strategies project.', python));
+		}
 		return { python, projectRoot };
 	}
 
