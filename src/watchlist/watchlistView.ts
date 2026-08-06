@@ -30,7 +30,18 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 	private readonly _disposables: vscode.Disposable[] = [];
 	private _symbols: string[];
 	private _refreshTimer: NodeJS.Timeout | undefined;
-	private _dirty = false;
+
+	/**
+	 * One node per symbol, for the lifetime of that symbol in the list.
+	 *
+	 * `onDidChangeTreeData.fire(node)` identifies the row to repaint by object identity, so
+	 * handing out a fresh `SymbolNode` per `getChildren` call would leave every targeted refresh
+	 * matching nothing and silently repainting nothing.
+	 */
+	private readonly _nodes = new Map<string, SymbolNode>();
+
+	/** Symbols quoted since the last repaint. */
+	private readonly _dirty = new Set<string>();
 
 	constructor(
 		private readonly _storage: vscode.Memento,
@@ -38,7 +49,7 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 	) {
 		this._symbols = this._storage.get<string[]>(STORAGE_KEY) ?? [...DEFAULT_SYMBOLS];
 
-		this._disposables.push(this._client.onDidChangeQuote(() => { this._dirty = true; }));
+		this._disposables.push(this._client.onDidChangeQuote(quote => { this._dirty.add(quote.symbol); }));
 		this._disposables.push(this._client.onDidChangeState(() => this._onDidChangeTreeData.fire(undefined)));
 
 		this._startRefreshLoop();
@@ -93,7 +104,14 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		if (element) {
 			return [];
 		}
-		return this._symbols.map(symbol => new SymbolNode(symbol));
+		return this._symbols.map(symbol => {
+			let node = this._nodes.get(symbol);
+			if (!node) {
+				node = new SymbolNode(symbol);
+				this._nodes.set(symbol, node);
+			}
+			return node;
+		});
 	}
 
 	async add(symbol: string): Promise<void> {
@@ -113,8 +131,12 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 			return;
 		}
 		this._symbols.splice(index, 1);
+		this._nodes.delete(symbol);
+		this._dirty.delete(symbol);
 		await this._persist();
 		this._client.unsubscribe([symbol]);
+		// Adding and removing change the shape of the tree rather than one row in it, so these
+		// stay root refreshes. They happen at human speed, where one progress bar is unremarkable.
 		this._onDidChangeTreeData.fire(undefined);
 	}
 
@@ -128,10 +150,20 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		}
 		const interval = vscode.workspace.getConfiguration('quant').get<number>('watchlist.refreshIntervalMs', 250);
 		this._refreshTimer = setInterval(() => {
-			if (this._dirty) {
-				this._dirty = false;
-				this._onDidChangeTreeData.fire(undefined);
+			if (this._dirty.size === 0) {
+				return;
 			}
+			// Per row rather than `fire(undefined)`. A root refresh is a reload as far as the
+			// workbench is concerned, so it draws the view's progress bar - and at a quarter of a
+			// second against a live feed that indicator never finishes, which reads as a fault
+			// rather than as prices arriving.
+			for (const symbol of this._dirty) {
+				const node = this._nodes.get(symbol);
+				if (node) {
+					this._onDidChangeTreeData.fire(node);
+				}
+			}
+			this._dirty.clear();
 		}, interval);
 	}
 
