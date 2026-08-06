@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
@@ -357,6 +358,14 @@ export class StrategyRunner {
 
 		const configuredPython = config.get<string>('engine.pythonPath', '').trim();
 		const python = configuredPython || path.join(projectRoot, '.venv', 'bin', 'python');
+
+		// Checked here so a missing interpreter is named as such, rather than surfacing later as a
+		// bare spawn ENOENT quoting a default path the user never chose.
+		if (!fs.existsSync(python)) {
+			throw new Error(configuredPython
+				? vscode.l10n.t('No Python interpreter at "{0}". Check "quant.engine.pythonPath".', python)
+				: vscode.l10n.t('No Python interpreter at "{0}". Set "quant.engine.pythonPath" to the interpreter the quant engine is installed in, or "quant.engine.projectPath" to the engine checkout.', python));
+		}
 		return { python, projectRoot };
 	}
 }
