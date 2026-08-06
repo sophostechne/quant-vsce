@@ -1,6 +1,6 @@
 # Quant Workbench
 
-Built-in extension providing market data, watchlists, charts and strategy tooling.
+Extension providing market data, watchlists, charts and strategy tooling.
 
 ## Architecture
 
@@ -61,21 +61,21 @@ Prices in this mode are a seeded random walk and must not be traded on.
 
 ## Build
 
-The extension is registered in two places, and both are required:
-
-- `build/npm/dirs.ts` — so `npm install` provisions `@types/node` locally. The tsconfig pins
-  `typeRoots` to `./node_modules/@types`, which does not walk up to the repo root, so without
-  this entry the compile fails with `TS2688: Cannot find type definition file for 'node'`.
-- `build/gulpfile.extensions.ts` — so the tsconfig is compiled.
-
 ```sh
-npx gulp compile-extension:quant
-npx gulp watch-extension:quant
+npm run compile     # extension host bundle to out/, webview bundles to media/
+npm run watch       # the same, rebuilt on change
+npm run typecheck   # tsc --noEmit over both tsconfigs, plus the vocabulary check
+npm test            # unit tests, in a VS Code downloaded on demand
+npm run package     # .vsix
 ```
 
-## Proposed API
+esbuild produces what runs; `tsc` only typechecks, since two emitters writing the same
+directory is a race rather than a build.
 
-`editorInsets` is declared in both `package.json` and `product.json#extensionEnabledApiProposals`.
-Both must list the same proposals: product.json **overrides** rather than merges, and a
-mismatch logs an error at startup (see `extensionsProposedApi.ts`). It is reserved for inline
-strategy annotations (signal and P&L markers next to source lines) and is not used yet.
+For a running workbench, press F5 (*Run Extension* in `.vscode/launch.json`) to open a second
+window with the extension loaded from source. To install the packaged build into an ordinary
+VS Code:
+
+```sh
+code --install-extension quant-1.0.0.vsix
+```

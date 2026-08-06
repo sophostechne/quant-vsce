@@ -6,10 +6,8 @@
 /**
  * Builds the extension host bundle and the two webview bundles.
  *
- * Replaces the fork's gulp pipeline, which compiled this extension as a built-in. A standalone
- * extension ships as a single file rather than a tree of modules, so the host code is bundled
- * here too - which the fork did not need to do, because a built-in is loaded from the
- * application's own `out` directory.
+ * The host code is bundled rather than emitted as a tree of modules, because an extension
+ * installed from a `.vsix` loads a single file and carries its own dependencies.
  *
  * `vscode` is external in every case. It is not a package: the extension host injects it at
  * runtime, and bundling it would produce a module resolution error at activation.
