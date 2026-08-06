@@ -12,6 +12,11 @@ eslint.config.mjs
 .vscode-test/**
 node_modules/**
 
+# Agent configuration, holding whatever the machine it was written on had been permitted to do.
+# Listed here as well as in .gitignore because vsce reads this file instead of that one, so an
+# ignored file is still a shipped file without this line.
+.claude/**
+
 # The test build emits loose modules beside the bundle, and every one of them would otherwise
 # ship: compiling tests once took the package from 11 files to 53.
 out/**
