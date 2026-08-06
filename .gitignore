@@ -7,3 +7,6 @@ out/
 media/*/*.js
 media/*/*.js.map
 .vscode-test/
+
+# Local agent settings. Machine specific, so it stays out of the shared history.
+.claude/settings.json
