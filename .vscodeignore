@@ -12,6 +12,12 @@ eslint.config.mjs
 .vscode-test/**
 node_modules/**
 
+# Charts and strategies are documents the extension opens, never part of the extension. Saving
+# one while a checkout is the open folder leaves it in the repository root, from where it would
+# otherwise be packaged and installed onto every user as though it were program material.
+*.chart
+*.strategy
+
 # Agent configuration, holding whatever the machine it was written on had been permitted to do.
 # Listed here as well as in .gitignore because vsce reads this file instead of that one, so an
 # ignored file is still a shipped file without this line.
