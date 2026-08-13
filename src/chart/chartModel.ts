@@ -244,11 +244,22 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 }
 
 export async function writeModel(document: vscode.TextDocument, model: ChartDocumentModel): Promise<void> {
+	// An empty list means "distribute evenly", which is how `parseModel` reads a missing key.
+	// Writing it back as `[]` would leave the file in a state its own parser normalises away,
+	// so every reset would look like a change.
+	const normalised: ChartDocumentModel = model.paneHeights?.length ? model : { ...model, paneHeights: undefined };
+	const text = JSON.stringify(normalised, undefined, '\t') + '\n';
+	// The document is what marks the tab dirty, so a write that changes nothing must not happen:
+	// re-picking the style already set, or resetting panes that are already even, would otherwise
+	// leave the user with unsaved changes they did not make.
+	if (text === document.getText()) {
+		return;
+	}
 	const edit = new vscode.WorkspaceEdit();
 	edit.replace(
 		document.uri,
 		new vscode.Range(0, 0, document.lineCount, 0),
-		JSON.stringify(model, undefined, '\t') + '\n'
+		text
 	);
 	await vscode.workspace.applyEdit(edit);
 }
