@@ -1,0 +1,14 @@
+{
+	// out/ is generated: esbuild writes the bundle there, and the test build writes a loose
+	// module per source file beside it. Both shadow the sources they came from, so leaving them
+	// visible means Go to Definition and Quick Open compete between a .ts and its stale .js.
+	//
+	// Excluded here rather than left to .gitignore because the two are read by different things:
+	// git decides what is committed, this decides what the workbench shows.
+	"files.exclude": {
+		"**/out": true
+	},
+	"search.exclude": {
+		"**/out": true
+	}
+}
