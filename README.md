@@ -48,6 +48,10 @@ documents means layouts get save, undo, diff and version control for free, and a
 just another editor tab — splits, editor groups and *Move Editor into New Window* work with
 no extra code.
 
+Charts and designer strategies live in `~/.quant`, not in the open workspace: the same layout
+is the one you want from any window, and it does not end up committed to whatever repository
+happened to be open when you drew it.
+
 ## Running without a daemon
 
 With no daemon reachable the extension falls back to a synthetic feed

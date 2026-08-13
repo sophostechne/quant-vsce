@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See LICENSE.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { CHART_VIEW_TYPE, ChartEditorProvider } from './chart/chartEditor';
 import { defaultChartContent } from './chart/chartModel';
@@ -141,24 +143,31 @@ async function runBacktest(runner: BacktestRunner, log: Logger, strategyFile: vs
 }
 
 /**
- * Charts are untitled `.chart` documents unless the user saves them. Saving a chart into the
- * workspace is what turns a layout into a versioned artifact.
+ * Charts and strategies belong to the user, not to whatever project happens to be open: the same
+ * BABA layout is the one they want from any window. `~/.quant` is that home, so a chart survives
+ * closing the workspace it was drawn in and never lands in someone else's repository.
+ */
+function quantHome(): vscode.Uri {
+	return vscode.Uri.file(path.join(os.homedir(), '.quant'));
+}
+
+/**
+ * Charts are untitled `.chart` documents unless the user saves them. Saving a chart into
+ * `~/.quant` is what turns a layout into something that comes back next time.
  */
 async function openChart(symbol: string): Promise<void> {
-	const folder = vscode.workspace.workspaceFolders?.[0];
+	const home = quantHome();
 	const fileName = `${symbol}.chart`;
 
 	// A saved layout for this symbol is one the user built and kept, so open that rather than
 	// shadowing it with a fresh untitled chart claiming the same name.
-	if (folder) {
-		const saved = vscode.Uri.joinPath(folder.uri, fileName);
-		if (await exists(saved)) {
-			await vscode.commands.executeCommand('vscode.openWith', saved, CHART_VIEW_TYPE);
-			return;
-		}
+	const saved = vscode.Uri.joinPath(home, fileName);
+	if (await exists(saved)) {
+		await vscode.commands.executeCommand('vscode.openWith', saved, CHART_VIEW_TYPE);
+		return;
 	}
 
-	const document = await openUntitled(fileName, () => defaultChartContent(symbol));
+	const document = await openUntitled(home, fileName, () => defaultChartContent(symbol));
 	await vscode.commands.executeCommand('vscode.openWith', document.uri, CHART_VIEW_TYPE);
 }
 
@@ -169,12 +178,12 @@ async function openChart(symbol: string): Promise<void> {
  * and the save prompt is the ordinary one for a new file.
  */
 async function openNewStrategy(): Promise<void> {
-	const folder = vscode.workspace.workspaceFolders?.[0];
-	// New means new. A workspace already holding strategy.strategy gets strategy-2.strategy, so
+	const home = quantHome();
+	// New means new. A `~/.quant` already holding strategy.strategy gets strategy-2.strategy, so
 	// the command keeps working instead of failing on a name the user cannot see or choose.
-	const fileName = folder ? await unusedName(folder.uri, 'strategy', '.strategy') : 'strategy.strategy';
+	const fileName = await unusedName(home, 'strategy', '.strategy');
 
-	const document = await openUntitled(fileName, defaultStrategyContent);
+	const document = await openUntitled(home, fileName, defaultStrategyContent);
 	await vscode.commands.executeCommand('vscode.openWith', document.uri, STRATEGY_VIEW_TYPE);
 }
 
@@ -198,24 +207,22 @@ async function unusedName(folder: vscode.Uri, base: string, extension: string): 
 }
 
 /**
- * Opens an untitled document called `fileName`, seeded with `content` if it is not already open.
+ * Opens an untitled document called `fileName` inside `folder`, seeded with `content` if it is
+ * not already open.
  *
  * The path on an `untitled:` URI is the path Save writes to, and it writes there directly rather
  * than asking. A bare file name is a *relative* path, which resolves against the filesystem
  * root - so saving an untitled chart attempted `/BABA.chart` and failed on permissions, naming a
  * location the user had never chosen.
  *
- * Anchoring the name to the workspace folder makes Save land where a saved chart belongs. With
- * no folder open there is nothing to anchor to, so the document is created without an associated
- * path at all and Save asks where to put it, which is the right question in that case.
+ * The folder is created up front rather than left to Save: an untitled document promising to
+ * write to a directory that does not exist yet is a failure deferred to the moment the user
+ * finally wants to keep their work.
  */
-async function openUntitled(fileName: string, content: () => string): Promise<vscode.TextDocument> {
-	const folder = vscode.workspace.workspaceFolders?.[0];
-	if (!folder) {
-		return vscode.workspace.openTextDocument({ language: 'json', content: content() });
-	}
+async function openUntitled(folder: vscode.Uri, fileName: string, content: () => string): Promise<vscode.TextDocument> {
+	await vscode.workspace.fs.createDirectory(folder);
 
-	const uri = vscode.Uri.joinPath(folder.uri, fileName).with({ scheme: 'untitled' });
+	const uri = vscode.Uri.joinPath(folder, fileName).with({ scheme: 'untitled' });
 	const document = await vscode.workspace.openTextDocument(uri);
 	if (document.getText().trim().length === 0) {
 		const edit = new vscode.WorkspaceEdit();
