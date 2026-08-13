@@ -5,7 +5,18 @@
 
 import * as vscode from 'vscode';
 
-const STRATEGY_GLOB = '**/strategies/**/*.{py,ts,js}';
+/**
+ * Python only, because the backtest runner is a NautilusTrader subprocess that imports the file
+ * it is given. Listing `.ts` and `.js` offered a Run Backtest action on files the runner can
+ * only refuse - and a `strategies` directory of TypeScript is not hypothetical, since this
+ * extension has one of its own:
+ *
+ *     Backtest failed: RuntimeError: Cannot import .../src/strategies/strategiesView.ts
+ *
+ * This also settles a disagreement between the two entry points: the editor title action was
+ * already `.py` only, while the view's inline action offered whatever the glob had matched.
+ */
+const STRATEGY_GLOB = '**/strategies/**/*.py';
 
 /**
  * Dependency trees contain `strategies` directories of their own - NautilusTrader ships two
