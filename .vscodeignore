@@ -3,6 +3,9 @@
 src/**
 preview-src/**
 scripts/**
+
+# icon.png at the root is what ships; this is the vector it was rasterised from.
+resources/**
 build.mjs
 eslint.config.mjs
 .vscode-test.mjs
