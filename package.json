@@ -2,7 +2,7 @@
 	"name": "quant-workbench",
 	"displayName": "%displayName%",
 	"description": "%description%",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"publisher": "sophostechne",
 	"license": "MIT",
 	"repository": {
@@ -298,7 +298,7 @@
 				},
 				"quant.bars.url": {
 					"type": "string",
-					"default": "",
+					"default": "https://bars.sophostechne.com",
 					"description": "%config.bars.url%"
 				},
 				"quant.watchlist.refreshIntervalMs": {

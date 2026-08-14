@@ -32,13 +32,13 @@ strategy forward all report that no interpreter is configured.
 
 ### Historical charts, with nothing installed
 
-```jsonc
-{ "quant.bars.url": "https://bars.example.com" }
-```
+Charts draw real historical prices out of the box, with no daemon and no credentials — bars come
+from `https://bars.sophostechne.com`, which serves IEX data derived from published captures.
+Point `quant.bars.url` at your own service to use different data, or empty it to fall back to the
+simulated feed.
 
-Point this at a published bars service and charts draw real historical prices with no daemon
-and no credentials. Bars stop at the last session's close, so the badge reads *history only* —
-accurate rather than reassuring.
+Bars stop at the last session's close, so the badge reads *history only* — accurate rather than
+reassuring.
 
 ### Live prices — the daemon
 
@@ -112,8 +112,8 @@ happened to be open when you drew it.
 
 ## Running without a daemon
 
-With no daemon reachable the extension falls back to a synthetic feed
-(`src/marketData/simulator.ts`) so the workbench renders during development. In that mode the
+With no daemon reachable the extension draws published history, and falls back to a synthetic
+feed (`src/marketData/simulator.ts`) only when that is unreachable too. In that mode the
 extension host relays simulated ticks over `postMessage`, which is a development affordance
 and **not** the real data path. The status bar shows *Simulated* with a warning background,
 and charts show a `simulated data` badge. Disable it with
@@ -139,5 +139,5 @@ window with the extension loaded from source. To install the packaged build into
 VS Code:
 
 ```sh
-code --install-extension quant-workbench-1.0.0.vsix
+code --install-extension quant-workbench-1.1.0.vsix
 ```
