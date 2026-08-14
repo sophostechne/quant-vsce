@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See LICENSE.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { spawn } from 'child_process';
+import { spawn, SpawnOptionsWithoutStdio } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
@@ -258,13 +259,10 @@ export class StrategyRunner {
 	}
 
 	/** Spawns `python` and delivers each complete NDJSON line to `onEvent`. */
-	private _stream(python: string, args: string[], cwd: string,
+	private _stream(python: string, args: string[], projectRoot: string | undefined,
 		onEvent: (event: SearchEvent) => void, token?: vscode.CancellationToken): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const child = spawn(python, args, {
-				cwd,
-				env: { ...process.env, PYTHONPATH: path.join(cwd, 'python') }
-			});
+			const child = spawn(python, args, this._spawnOptions(projectRoot));
 
 			// Chunks arrive on no particular boundary, so the tail is held back until its
 			// newline turns up rather than being parsed as a truncated object.
@@ -309,14 +307,10 @@ export class StrategyRunner {
 		});
 	}
 
-	private _run(python: string, args: string[], cwd: string, token?: vscode.CancellationToken): Promise<Response> {
+	private _run(python: string, args: string[], projectRoot: string | undefined,
+		token?: vscode.CancellationToken): Promise<Response> {
 		return new Promise((resolve, reject) => {
-			// PYTHONPATH rather than an install step, so the extension works against a checkout
-			// without the package having been installed into the interpreter.
-			const child = spawn(python, args, {
-				cwd,
-				env: { ...process.env, PYTHONPATH: path.join(cwd, 'python') }
-			});
+			const child = spawn(python, args, this._spawnOptions(projectRoot));
 
 			let stdout = '';
 			let stderr = '';
@@ -346,18 +340,33 @@ export class StrategyRunner {
 		});
 	}
 
-	/** Resolves the interpreter and engine checkout, or explains precisely what is missing. */
-	private _resolvePaths(): { python: string; projectRoot: string } {
+	/**
+	 * Resolves the interpreter, and the engine checkout when there is one, or explains precisely
+	 * what is missing.
+	 *
+	 * Two shapes are supported. The engine installed into an interpreter needs `engine.pythonPath`
+	 * alone and has no checkout; a working tree needs `engine.projectPath`, which supplies both a
+	 * default interpreter and the `PYTHONPATH` that makes an uninstalled tree importable. The open
+	 * folder is only taken as a checkout when it actually contains `python/quant`: without that
+	 * test, a user running an installed engine would have whatever project they had open silently
+	 * used as the engine root, and see import errors naming a directory they never configured.
+	 */
+	private _resolvePaths(): { python: string; projectRoot?: string } {
 		const config = vscode.workspace.getConfiguration('quant');
 		const configured = config.get<string>('engine.projectPath', '').trim();
-		const projectRoot = configured || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-
-		if (!projectRoot) {
-			throw new Error(vscode.l10n.t('Set "quant.engine.projectPath" to the quant engine directory.'));
-		}
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const projectRoot = configured
+			|| (folder && fs.existsSync(path.join(folder, 'python', 'quant')) ? folder : undefined);
 
 		const configuredPython = config.get<string>('engine.pythonPath', '').trim();
-		const python = configuredPython || path.join(projectRoot, '.venv', 'bin', 'python');
+		if (!configuredPython && !projectRoot) {
+			throw new Error(vscode.l10n.t('Set "quant.engine.pythonPath" to the interpreter the quant engine is installed in, or "quant.engine.projectPath" to an engine checkout.'));
+		}
+
+		// Virtual environments put the interpreter under Scripts on Windows and bin everywhere
+		// else, so the checkout default has to be platform specific to be a default at all.
+		const python = configuredPython || path.join(projectRoot!, '.venv',
+			...process.platform === 'win32' ? ['Scripts', 'python.exe'] : ['bin', 'python']);
 
 		// Checked here so a missing interpreter is named as such, rather than surfacing later as a
 		// bare spawn ENOENT quoting a default path the user never chose.
@@ -367,5 +376,19 @@ export class StrategyRunner {
 				: vscode.l10n.t('No Python interpreter at "{0}". Set "quant.engine.pythonPath" to the interpreter the quant engine is installed in, or "quant.engine.projectPath" to the engine checkout.', python));
 		}
 		return { python, projectRoot };
+	}
+
+	/**
+	 * Spawn options for the engine.
+	 *
+	 * A checkout is put on `PYTHONPATH` rather than installed, so the extension works against a
+	 * tree that was never `pip install`ed. An installed engine needs neither, and must not be run
+	 * from a directory chosen on its behalf: the home directory is somewhere every user has, with
+	 * no `quant` package in it to shadow the installed one.
+	 */
+	private _spawnOptions(projectRoot?: string): SpawnOptionsWithoutStdio {
+		return projectRoot
+			? { cwd: projectRoot, env: { ...process.env, PYTHONPATH: path.join(projectRoot, 'python') } }
+			: { cwd: os.homedir() };
 	}
 }
