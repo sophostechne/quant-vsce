@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+- Charts draw real historical prices with nothing else installed. With no daemon reachable the
+  extension now reads published bars over HTTPS, and falls back to the simulated feed only when
+  that is unreachable too. The badge names whichever source answered.
+- The engine can be an installed package rather than a checkout: `quant.engine.pythonPath` alone
+  is enough, and the checkout default is now correct on Windows.
+- An icon, gallery metadata, and a README that opens with how to install.
+
 ## 1.0.0
 
 Split out of the VS Code fork it was built inside, and now packages as an ordinary
