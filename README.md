@@ -30,6 +30,16 @@ there. With the checkout open as your folder, neither setting is needed.
 Without this, the designer opens and charts work, but evaluating, searching and walking a
 strategy forward all report that no interpreter is configured.
 
+### Historical charts, with nothing installed
+
+```jsonc
+{ "quant.bars.url": "https://bars.example.com" }
+```
+
+Point this at a published bars service and charts draw real historical prices with no daemon
+and no credentials. Bars stop at the last session's close, so the badge reads *history only* —
+accurate rather than reassuring.
+
 ### Live prices — the daemon
 
 ```sh
@@ -40,10 +50,15 @@ Defaults to `127.0.0.1:8787`, which is where the extension looks; change that wi
 `quant.daemon.host` and `quant.daemon.port`. Providers, credentials and tuning are documented
 in the [daemon repository](https://github.com/sophostechne/quant-daemon).
 
-**With no daemon reachable the workbench falls back to a synthetic feed.** Prices in that mode
-are a seeded random walk and must not be traded on — the status bar reads *Simulated* and
-charts carry a `simulated data` badge. Turn the fallback off with
-`quant.daemon.allowSimulatedFeed: false`.
+### What a chart falls back to
+
+In order: a daemon, then published history, then a synthetic feed. The last is a seeded random
+walk that **must not be traded on** — the status bar reads *Simulated* and charts carry a
+`simulated data` badge. Turn it off with `quant.daemon.allowSimulatedFeed: false`.
+
+The badge always names the actual source of the bars on screen rather than the state of the
+connection, because with no daemon those two stopped meaning the same thing: real published
+history and invented prices are both reachable, and only the fetch knows which answered.
 
 ## Architecture
 

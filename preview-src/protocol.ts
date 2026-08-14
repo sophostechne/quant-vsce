@@ -22,8 +22,14 @@ export interface Bar {
 	volume: number;
 }
 
-/** Where the bars currently on screen came from. */
-export type BarSource = 'live' | 'simulated';
+/**
+ * Where the bars currently on screen came from.
+ *
+ * `history` is published historical data with no live stream behind it: real prices, but the
+ * last bar is the last session's, not this second's. It is a different claim from both `live`
+ * and `simulated`, and collapsing it into either would misstate what the user is looking at.
+ */
+export type BarSource = 'live' | 'history' | 'simulated';
 
 export interface IndicatorSpec {
 	type: 'sma' | 'ema' | 'bbands' | 'vwap' | 'rsi' | 'macd' | 'stoch' | 'atr' | 'volume';

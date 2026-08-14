@@ -296,6 +296,11 @@
 					"default": true,
 					"description": "%config.daemon.allowSimulatedFeed%"
 				},
+				"quant.bars.url": {
+					"type": "string",
+					"default": "",
+					"description": "%config.bars.url%"
+				},
 				"quant.watchlist.refreshIntervalMs": {
 					"type": "number",
 					"default": 250,

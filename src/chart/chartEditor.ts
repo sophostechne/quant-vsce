@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
-import { ConnectionState, MarketDataClient } from '../marketData/client';
+import { BarSource, ConnectionState, MarketDataClient } from '../marketData/client';
 import { Bar, TIMEFRAMES, Tick, Timeframe } from '../protocol';
 import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
@@ -95,13 +95,16 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		};
 
 		const pushHistory = async () => {
-			// Provenance travels with the bars. The chart must be able to say where what it is
-			// drawing came from, which the transport alone cannot tell it - a healthy socket
-			// says nothing about whether these particular bars are real.
-			const source = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
+			// Provenance travels with the bars, and comes from whatever actually served them
+			// rather than from connection state: with no daemon, published history and the
+			// simulator are both reachable, and only the fetch knows which one answered.
+			let source: BarSource = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
 			try {
-				const bars = await this._client.history(model.symbol, model.timeframe, model.bars);
-				void webviewPanel.webview.postMessage({ type: 'history', symbol: model.symbol, bars, source });
+				const result = await this._client.history(model.symbol, model.timeframe, model.bars);
+				source = result.source;
+				void webviewPanel.webview.postMessage({
+					type: 'history', symbol: model.symbol, bars: result.bars, source
+				});
 			} catch (error) {
 				this._log.error(`History for ${model.symbol} failed`, error);
 				// Send an empty series so the chart discards whatever it was showing. Keeping
