@@ -367,6 +367,11 @@ function renderStatus(): void {
 		text = 'no data';
 	} else if (barsSource === 'simulated') {
 		text = 'simulated data';
+	} else if (barsSource === 'history') {
+		// Real prices, but the last bar closed with the last session rather than a moment ago.
+		// Not a warning: nothing here is wrong or invented, it simply is not streaming.
+		text = 'history only';
+		warn = false;
 	} else if (barsSource === 'live') {
 		text = dataPlaneHealthy ? 'live' : 'live (stream disconnected)';
 		warn = !dataPlaneHealthy;

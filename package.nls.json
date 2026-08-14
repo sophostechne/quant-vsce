@@ -12,6 +12,7 @@
 	"config.daemon.port": "Port of the local market data daemon.",
 	"config.daemon.autoConnect": "Connect to the market data daemon on startup.",
 	"config.daemon.allowSimulatedFeed": "When no daemon is reachable, drive the UI with a synthetic feed. Development only.",
+	"config.bars.url": "Root of a published historical bars service, used for charts when no daemon is reachable. Without it, charts fall back to a simulated feed instead.",
 	"config.watchlist.refreshIntervalMs": "How often the watchlist tree coalesces and repaints price updates. Ticks arrive far faster than this; the tree is DOM-backed and must not repaint per tick.",
 	"cmd.category": "Quant",
 	"cmd.connect": "Connect to Market Data",

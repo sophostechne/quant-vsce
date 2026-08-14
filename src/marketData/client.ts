@@ -8,6 +8,14 @@ import { Logger } from '../logger';
 import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
 import { SimulatedFeed } from './simulator';
 
+/** Where a set of bars came from. Mirrors `BarSource` in the webview's protocol. */
+export type BarSource = 'live' | 'history' | 'simulated';
+
+export interface HistoryResult {
+	readonly bars: readonly Bar[];
+	readonly source: BarSource;
+}
+
 export const enum ConnectionState {
 	Disconnected,
 	Connecting,
@@ -231,13 +239,61 @@ export class MarketDataClient implements vscode.Disposable {
 		}
 	}
 
-	async history(symbol: string, timeframe: Timeframe, count: number): Promise<readonly Bar[]> {
+	/**
+	 * Bars, and an honest account of where they came from.
+	 *
+	 * Three sources in descending order of truth: a daemon, published history over HTTPS, and
+	 * the simulator. The middle one is why this returns its provenance rather than letting the
+	 * caller infer it from connection state - a user with no daemon is no longer necessarily
+	 * looking at synthetic prices, and a chart that cannot tell the difference would caption
+	 * real bars as simulated or, far worse, the reverse.
+	 */
+	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
 		if (this._state === ConnectionState.Simulated) {
-			return this._simulator.history(symbol, timeframe, count);
+			const published = await this._publishedHistory(symbol, timeframe, count);
+			return published
+				? { bars: published, source: 'history' }
+				: { bars: this._simulator.history(symbol, timeframe, count), source: 'simulated' };
 		}
 		if (this._state !== ConnectionState.Connected) {
 			throw new Error('Not connected to a market data daemon.');
 		}
+		return { bars: await this._daemonHistory(symbol, timeframe, count), source: 'live' };
+	}
+
+	/**
+	 * Published bars, or undefined when there is nothing to serve them.
+	 *
+	 * Every failure here is non-fatal by design: this runs precisely when no daemon answered, so
+	 * the alternative is the simulator rather than nothing. An unset URL, an unreachable host
+	 * and a symbol that is not published all mean the same thing to the caller.
+	 */
+	private async _publishedHistory(symbol: string, timeframe: Timeframe, count: number): Promise<readonly Bar[] | undefined> {
+		const base = vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, '');
+		if (!base) {
+			return undefined;
+		}
+		const url = `${base}/${timeframe}/${encodeURIComponent(symbol.toUpperCase())}.json`;
+		try {
+			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+			if (!response.ok) {
+				this._log.info(`No published history for ${symbol} ${timeframe} (${response.status})`);
+				return undefined;
+			}
+			const series = await response.json() as { bars?: Bar[] };
+			const bars = series.bars ?? [];
+			if (bars.length === 0) {
+				return undefined;
+			}
+			// Series are stored whole and oldest first, so the most recent `count` is the tail.
+			return count < bars.length ? bars.slice(-count) : bars;
+		} catch (error) {
+			this._log.warn(`Published history for ${symbol} unavailable: ${error instanceof Error ? error.message : String(error)}`);
+			return undefined;
+		}
+	}
+
+	private _daemonHistory(symbol: string, timeframe: Timeframe, count: number): Promise<readonly Bar[]> {
 		const requestId = this._nextRequestId++;
 		return new Promise<readonly Bar[]>((resolve, reject) => {
 			const timer = setTimeout(() => {
