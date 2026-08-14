@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Source for icon.png. Rasterise with:
+       inkscape resources/icon.svg -o icon.png -w 128 -h 128 -->
+  <rect width="128" height="128" rx="26" fill="#1b2430"/>
+
+  <!-- Candles rather than a line: the chart is the product, and a body-and-wick silhouette
+       reads as a market at 32px where a polyline degrades into a smudge. Green and red are
+       the marketplace's only chance to say what this is before the title is read. -->
+  <g stroke-linecap="round">
+    <!-- down candle -->
+    <line x1="34" y1="30" x2="34" y2="94" stroke="#e05561" stroke-width="6"/>
+    <rect x="24" y="46" width="20" height="34" rx="4" fill="#e05561"/>
+
+    <!-- up candle, taller and to the right so the pair implies a trend, not a pattern -->
+    <line x1="70" y1="22" x2="70" y2="102" stroke="#4ec9a5" stroke-width="6"/>
+    <rect x="60" y="38" width="20" height="48" rx="4" fill="#4ec9a5"/>
+
+    <!-- third candle, clipped by the frame, so the chart continues past the icon -->
+    <line x1="104" y1="34" x2="104" y2="88" stroke="#4ec9a5" stroke-width="6"/>
+    <rect x="94" y="48" width="20" height="30" rx="4" fill="#4ec9a5"/>
+  </g>
+</svg>

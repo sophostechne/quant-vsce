@@ -2,6 +2,49 @@
 
 Extension providing market data, watchlists, charts and strategy tooling.
 
+Charts with 35 drawing tools and indicators in overlay and study panes; a no-code strategy
+designer generated from the engine's own type system; and an evolutionary search that reports
+every candidate twice — on the bars it was fitted to, and on bars withheld from the search.
+
+## Setup
+
+The workbench is the user interface for two other processes, and installs without either. What
+each one adds:
+
+### Strategies and backtests — the engine
+
+```sh
+pip install sophostechne-quant
+```
+
+Then point the extension at the interpreter you installed it into:
+
+```jsonc
+{ "quant.engine.pythonPath": "/path/to/venv/bin/python" }   // Scripts\\python.exe on Windows
+```
+
+Working from a checkout of the [engine](https://github.com/sophostechne/quant) instead? Set
+`quant.engine.projectPath` to it and leave `pythonPath` empty — its `.venv` is found from
+there. With the checkout open as your folder, neither setting is needed.
+
+Without this, the designer opens and charts work, but evaluating, searching and walking a
+strategy forward all report that no interpreter is configured.
+
+### Live prices — the daemon
+
+```sh
+npx quant-daemon
+```
+
+Defaults to `127.0.0.1:8787`, which is where the extension looks; change that with
+`quant.daemon.host` and `quant.daemon.port`. Providers, credentials and tuning are documented
+in the [daemon repository](https://github.com/sophostechne/quant-daemon).
+
+**With no daemon reachable the workbench falls back to a synthetic feed.** Prices in that mode
+are a seeded random walk and must not be traded on — the status bar reads *Simulated* and
+charts carry a `simulated data` badge. Turn the fallback off with
+`quant.daemon.allowSimulatedFeed: false`.
+
 ## Architecture
 
 The important constraint is that **tick traffic must not flow through the extension host.**
@@ -12,7 +55,7 @@ single threaded and shared with every other extension, so a busy feed there stal
 work. The design therefore splits into two planes:
 
 ```
-market data daemon (separate process, not in this repo)
+market data daemon (separate process, see the quant-daemon repository)
   ├── control socket  ──── JSON ────▶  extension host   (this extension)
   │      subscribe / unsubscribe / history / symbol interning
   │

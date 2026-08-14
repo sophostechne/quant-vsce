@@ -7,7 +7,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/sophos-build/quant-vsce.git"
+		"url": "https://github.com/sophostechne/quant-vsce.git"
+	},
+	"homepage": "https://github.com/sophostechne/quant-vsce#readme",
+	"bugs": {
+		"url": "https://github.com/sophostechne/quant-vsce/issues"
 	},
 	"engines": {
 		"vscode": "^1.90.0"
@@ -20,8 +24,18 @@
 		}
 	},
 	"categories": [
+		"Data Science",
+		"Visualization",
 		"Other"
 	],
+	"keywords": [
+		"trading",
+		"backtesting",
+		"charts",
+		"market data",
+		"strategy"
+	],
+	"icon": "icon.png",
 	"main": "./out/extension.js",
 	"activationEvents": [
 		"onStartupFinished"
