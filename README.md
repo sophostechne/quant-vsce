@@ -33,7 +33,7 @@ strategy forward all report that no interpreter is configured.
 ### Live prices — the daemon
 
 ```sh
-npx quant-daemon
+npx @sophostechne/quant-daemon
 ```
 
 Defaults to `127.0.0.1:8787`, which is where the extension looks; change that with
