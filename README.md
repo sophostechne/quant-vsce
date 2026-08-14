@@ -124,5 +124,5 @@ window with the extension loaded from source. To install the packaged build into
 VS Code:
 
 ```sh
-code --install-extension quant-1.0.0.vsix
+code --install-extension quant-workbench-1.0.0.vsix
 ```
