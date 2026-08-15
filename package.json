@@ -325,7 +325,7 @@
 				},
 				"quant.backtest.timeframe": {
 					"type": "string",
-					"default": "1h",
+					"default": "5m",
 					"enum": [
 						"1m",
 						"5m",
