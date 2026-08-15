@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+- A new chart opens on daily bars. It opened on 1-minute bars, which published history does not
+  carry, so a fresh install with no daemon fell straight through to the simulated feed - the one
+  thing this workbench should not show anyone by default.
+- A symbol or timeframe that is not published now reads *no {timeframe} history published*
+  rather than being replaced with synthetic prices. An unreachable service still falls back to
+  the simulator; a service that answers "I do not have that" is telling the truth, and inventing
+  a chart in response is worse than drawing none.
+
 ## 1.1.0
 
 - Charts draw real historical prices with nothing else installed. With no daemon reachable the

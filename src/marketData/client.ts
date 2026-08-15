@@ -14,7 +14,22 @@ export type BarSource = 'live' | 'history' | 'simulated';
 export interface HistoryResult {
 	readonly bars: readonly Bar[];
 	readonly source: BarSource;
+	/** Why the bars are empty, when the source answered and simply had none. */
+	readonly reason?: string;
 }
+
+/**
+ * What a published bars service had to say.
+ *
+ * `absent` and `unavailable` are kept apart because they justify opposite responses. A service
+ * that cannot be reached is an outage, and falling back to the simulator keeps the workbench
+ * usable. A service that answers 404 has told us something true - this symbol or timeframe is
+ * not published - and answering that with invented prices would be a worse chart than none.
+ */
+type Published =
+	| { kind: 'bars'; bars: readonly Bar[] }
+	| { kind: 'absent'; reason: string }
+	| { kind: 'unavailable' };
 
 export const enum ConnectionState {
 	Disconnected,
@@ -251,9 +266,14 @@ export class MarketDataClient implements vscode.Disposable {
 	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
 		if (this._state === ConnectionState.Simulated) {
 			const published = await this._publishedHistory(symbol, timeframe, count);
-			return published
-				? { bars: published, source: 'history' }
-				: { bars: this._simulator.history(symbol, timeframe, count), source: 'simulated' };
+			switch (published.kind) {
+				case 'bars':
+					return { bars: published.bars, source: 'history' };
+				case 'absent':
+					return { bars: [], source: 'history', reason: published.reason };
+				case 'unavailable':
+					return { bars: this._simulator.history(symbol, timeframe, count), source: 'simulated' };
+			}
 		}
 		if (this._state !== ConnectionState.Connected) {
 			throw new Error('Not connected to a market data daemon.');
@@ -261,35 +281,35 @@ export class MarketDataClient implements vscode.Disposable {
 		return { bars: await this._daemonHistory(symbol, timeframe, count), source: 'live' };
 	}
 
-	/**
-	 * Published bars, or undefined when there is nothing to serve them.
-	 *
-	 * Every failure here is non-fatal by design: this runs precisely when no daemon answered, so
-	 * the alternative is the simulator rather than nothing. An unset URL, an unreachable host
-	 * and a symbol that is not published all mean the same thing to the caller.
-	 */
-	private async _publishedHistory(symbol: string, timeframe: Timeframe, count: number): Promise<readonly Bar[] | undefined> {
+	/** Asks a published bars service for one series. Never throws; see `Published`. */
+	private async _publishedHistory(symbol: string, timeframe: Timeframe, count: number): Promise<Published> {
 		const base = vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, '');
 		if (!base) {
-			return undefined;
+			return { kind: 'unavailable' };
 		}
 		const url = `${base}/${timeframe}/${encodeURIComponent(symbol.toUpperCase())}.json`;
 		try {
 			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+			if (response.status === 404) {
+				// The service is up and says it does not carry this. Reported rather than
+				// replaced: a chart of random numbers is not a better answer than an empty one.
+				this._log.info(`No published ${timeframe} history for ${symbol}`);
+				return { kind: 'absent', reason: vscode.l10n.t('no {0} history published for {1}', timeframe, symbol.toUpperCase()) };
+			}
 			if (!response.ok) {
-				this._log.info(`No published history for ${symbol} ${timeframe} (${response.status})`);
-				return undefined;
+				this._log.warn(`Published history for ${symbol} returned ${response.status}`);
+				return { kind: 'unavailable' };
 			}
 			const series = await response.json() as { bars?: Bar[] };
 			const bars = series.bars ?? [];
 			if (bars.length === 0) {
-				return undefined;
+				return { kind: 'absent', reason: vscode.l10n.t('no {0} history published for {1}', timeframe, symbol.toUpperCase()) };
 			}
 			// Series are stored whole and oldest first, so the most recent `count` is the tail.
-			return count < bars.length ? bars.slice(-count) : bars;
+			return { kind: 'bars', bars: count < bars.length ? bars.slice(-count) : bars };
 		} catch (error) {
 			this._log.warn(`Published history for ${symbol} unavailable: ${error instanceof Error ? error.message : String(error)}`);
-			return undefined;
+			return { kind: 'unavailable' };
 		}
 	}
 
