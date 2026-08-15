@@ -185,8 +185,8 @@ export class StrategyRunner {
 			'-m', 'quant.cli', 'evaluate',
 			'--strategy', scratch.fsPath,
 			'--product', config.get<string>('backtest.product', 'BTC-USD'),
-			'--timeframe', config.get<string>('backtest.timeframe', '6h'),
-			'--bars', String(config.get<number>('backtest.bars', 2000))
+			'--timeframe', config.get<string>('backtest.timeframe', '5m'),
+			'--bars', String(config.get<number>('backtest.bars', 1200))
 		];
 
 		this._log.info(`Evaluating strategy: ${python} ${args.join(' ')}`);
@@ -213,8 +213,8 @@ export class StrategyRunner {
 		const args = [
 			'-m', 'quant.cli', 'evolve',
 			'--product', config.get<string>('backtest.product', 'BTC-USD'),
-			'--timeframe', config.get<string>('backtest.timeframe', '6h'),
-			'--bars', String(config.get<number>('backtest.bars', 2000)),
+			'--timeframe', config.get<string>('backtest.timeframe', '5m'),
+			'--bars', String(config.get<number>('backtest.bars', 1200)),
 			'--population', String(options.population),
 			'--generations', String(options.generations),
 			'--survivors', String(options.survivors)
@@ -243,8 +243,8 @@ export class StrategyRunner {
 		const args = [
 			'-m', 'quant.cli', 'walkforward',
 			'--product', config.get<string>('backtest.product', 'BTC-USD'),
-			'--timeframe', config.get<string>('backtest.timeframe', '6h'),
-			'--bars', String(config.get<number>('backtest.bars', 2000)),
+			'--timeframe', config.get<string>('backtest.timeframe', '5m'),
+			'--bars', String(config.get<number>('backtest.bars', 1200)),
 			'--train-bars', String(options.trainBars),
 			'--test-bars', String(options.testBars),
 			'--population', String(options.population),
