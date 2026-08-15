@@ -66,7 +66,13 @@ export interface ChartDocumentModel {
 	paneHeights?: number[];
 }
 
-const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1m', bars: 240, indicators: [], drawings: [] };
+/**
+ * A new chart opens on daily bars because that is what a fresh install can actually draw:
+ * published history carries 1d, and a minute chart needs a daemon streaming into it. Opening on
+ * 1m meant every first launch fell through to the simulated feed, which is the one thing this
+ * workbench should not show anyone by default.
+ */
+const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1d', bars: 240, indicators: [], drawings: [] };
 
 /**
  * Indicators come from the document, so a malformed entry is user input rather than a bug.

@@ -103,7 +103,10 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				const result = await this._client.history(model.symbol, model.timeframe, model.bars);
 				source = result.source;
 				void webviewPanel.webview.postMessage({
-					type: 'history', symbol: model.symbol, bars: result.bars, source
+					type: 'history', symbol: model.symbol, bars: result.bars, source,
+					// A source that answered and had nothing says so on the chart, rather than
+					// leaving "no data" to be read as a fault.
+					...(result.reason ? { error: result.reason } : {})
 				});
 			} catch (error) {
 				this._log.error(`History for ${model.symbol} failed`, error);
