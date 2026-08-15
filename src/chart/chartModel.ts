@@ -67,12 +67,24 @@ export interface ChartDocumentModel {
 }
 
 /**
- * A new chart opens on daily bars because that is what a fresh install can actually draw:
- * published history carries 1d, and a minute chart needs a daemon streaming into it. Opening on
- * 1m meant every first launch fell through to the simulated feed, which is the one thing this
- * workbench should not show anyone by default.
+ * A new chart opens on 5m bars.
+ *
+ * The constraint is the depth of published history rather than the resolution. The service is
+ * backfilled a session at a time, and at the month it currently carries, 240 daily bars would
+ * draw about 21 candles - which reads as a broken chart rather than as a short one. 240 bars of
+ * 5m is roughly three sessions, and the published range holds about twenty.
+ *
+ * It has to be a *published* timeframe. The bars provider does not resample: an unpublished one
+ * 404s and comes back as no history, and the chart then fills from live trades, falling through
+ * to the simulated feed on a fresh install - which is the one thing this workbench should not
+ * show anyone by default. So this default and the ingest's timeframe list move together.
+ *
+ * 5m is the finest resolution these bars support honestly. They are IEX TOPS - one venue at a
+ * few percent of the consolidated tape - so the finer the bucket, the more of what it shows is
+ * which venue happened to print rather than what the stock did. Anything below 5m here would be
+ * measuring the sampling, and 1m is deliberately not in the ingest's list.
  */
-const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '1d', bars: 240, indicators: [], drawings: [] };
+const DEFAULT_MODEL: ChartDocumentModel = { style: 'candles', scale: 'linear', symbol: 'AAPL', timeframe: '5m', bars: 240, indicators: [], drawings: [] };
 
 /**
  * Indicators come from the document, so a malformed entry is user input rather than a bug.
