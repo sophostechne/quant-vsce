@@ -67,6 +67,12 @@ a provider you hold credentials for.
 
 Put `bars` last in the provider list so it claims only what the live feed did not.
 
+The daemon also unlocks the sub-5m timeframes. `1s` and `5s` are not stored anywhere — they
+exist only as live trades aggregated as they arrive — and `1m` is deliberately not published,
+because these are single-venue IEX bars and a bucket that fine shows which venue printed rather
+than what the instrument did. The chart's timeframe picker hides all three until a daemon is
+connected, rather than offering a guaranteed empty chart, and widens as soon as one is.
+
 ### Where a chart's bars come from
 
 A daemon when one is connected and carries the symbol; published history otherwise. If the

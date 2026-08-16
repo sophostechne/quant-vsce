@@ -89,6 +89,31 @@ export type Timeframe = '1s' | '5s' | '1m' | '5m' | '15m' | '1h' | '1d';
 
 export const TIMEFRAMES: readonly Timeframe[] = ['1s', '5s', '1m', '5m', '15m', '1h', '1d'];
 
+/**
+ * Timeframes that only a daemon can fill, because no bars service publishes them.
+ *
+ * `1s` and `5s` are not stored anywhere - they exist only as live trades aggregated in the
+ * moment. `1m` could be published and deliberately is not: these are IEX TOPS bars from one
+ * venue at a few percent of the consolidated tape, and a bucket that fine shows which venue
+ * happened to print rather than what the instrument did. 5m is as fine as the data reads
+ * honestly.
+ *
+ * Offering these with no daemon connected is offering a guaranteed empty chart, so the picker
+ * hides them until something can answer.
+ */
+export const LIVE_ONLY_TIMEFRAMES: readonly Timeframe[] = ['1s', '5s', '1m'];
+
+/** The timeframes worth offering, given whether a daemon is there to serve the fine ones. */
+export function availableTimeframes(daemonConnected: boolean, keep?: Timeframe): readonly Timeframe[] {
+	if (daemonConnected) {
+		return TIMEFRAMES;
+	}
+	// `keep` is whatever the chart is already on. A document saved at 1m must still show its own
+	// value in the picker, or the control reads as broken rather than as narrowed - and the
+	// chart already says plainly that nothing publishes that timeframe.
+	return TIMEFRAMES.filter(timeframe => !LIVE_ONLY_TIMEFRAMES.includes(timeframe) || timeframe === keep);
+}
+
 export function timeframeToMillis(timeframe: Timeframe): number {
 	switch (timeframe) {
 		case '1s': return 1_000;
