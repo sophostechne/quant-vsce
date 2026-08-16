@@ -100,9 +100,13 @@ export async function newVisualizer(
 
 	if (activeChart) {
 		const model = parseModel(activeChart, log);
+		const existing = model.visualizers ?? [];
+		// Listing a visualizer twice runs it twice and draws it twice, so re-running the command
+		// for a name already attached must not append. Overwriting a file the user already had
+		// is the deliberate part of that: they asked for this name again.
 		const attached: ChartDocumentModel = {
 			...model,
-			visualizers: [...(model.visualizers ?? []), relative],
+			visualizers: existing.includes(relative) ? existing : [...existing, relative],
 		};
 		await writeModel(activeChart, attached);
 	}
