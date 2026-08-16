@@ -31,7 +31,20 @@ export interface Bar {
  */
 export type BarProvenance = 'live' | 'history' | 'simulated';
 
-/** What a user's visualizers drew, already validated by the extension host. */
+/**
+ * What a user's visualizers drew, already validated by the extension host.
+ *
+ * The gaps are typed `null`, not `undefined`, and that is not a detail. Everywhere else in the
+ * chart a missing value is `undefined` - a warm-up bar, a bar no regime covers - and every
+ * consumer tests for exactly that. This message is the one that crosses `postMessage`, which VS
+ * Code serialises as JSON, and `JSON.stringify([undefined])` is `"[null]"`. The host sends holes
+ * and the webview receives nulls.
+ *
+ * Declaring `undefined` here said the opposite and compiled, so `value !== undefined` passed for
+ * every hole: a gap became a real value worth zero, which dragged the price axis down to zero,
+ * and a null colour reached `themeColor` and threw mid-frame. `chart.ts` converts these back to
+ * `undefined` on receipt; the types exist to make anyone who skips that step fail to compile.
+ */
 export interface VisualizersMessage {
 	type: 'visualizers';
 	/** The bars this was computed against. Drawn only while it matches what is on screen. */
@@ -41,10 +54,10 @@ export interface VisualizersMessage {
 		readonly color: string;
 		readonly fill: boolean;
 		readonly overlay: boolean;
-		readonly lines: readonly (readonly (number | undefined)[])[];
+		readonly lines: readonly (readonly (number | null)[])[];
 	}[];
-	/** One colour per bar, painted behind everything. Undefined leaves a bar untinted. */
-	background: readonly (string | undefined)[];
+	/** One colour per bar, painted behind everything. Null leaves a bar untinted. */
+	background: readonly (string | null)[];
 	markers: readonly {
 		readonly index: number;
 		readonly text: string;
