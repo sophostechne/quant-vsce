@@ -6,13 +6,14 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
+import { LastClose, LastCloseCache } from './closes';
 import { SimulatedFeed } from './simulator';
 import {
 	availableTimeframes, BarProvenance, BinanceSource, CoinbaseSource, DaemonSource, HistorySource,
 	PublishedBarsSource,
 } from './sources';
 
-export type { BarProvenance };
+export type { BarProvenance, LastClose };
 
 export interface HistoryResult {
 	readonly bars: readonly Bar[];
@@ -23,18 +24,6 @@ export interface HistoryResult {
 	readonly venue?: string;
 	/** The answering venue trades without sessions, so its latest bar is still forming. */
 	readonly continuous?: boolean;
-}
-
-/** A price for a symbol with nothing streaming it. See `lastClose`. */
-export interface LastClose {
-	readonly quote: Quote;
-	/**
-	 * True when the venue never closes, which changes what this price is rather than how fresh
-	 * it is: a still-forming daily bar's close is the current price, where a finished session's
-	 * is the last one traded before the bell.
-	 */
-	readonly continuous: boolean;
-	readonly venue?: string;
 }
 
 export const enum ConnectionState {
@@ -62,16 +51,6 @@ interface WebSocketLike {
 type WebSocketCtor = new (url: string) => WebSocketLike;
 
 const RECONNECT_DELAY_MS = 3_000;
-
-/**
- * How long a cached close stands before it is refetched.
- *
- * An equity close does not change until the session shuts, so this is really sized for crypto,
- * where the latest daily bar is still forming and its close moves. Five minutes keeps a
- * watchlist of a hundred symbols to a trickle of requests while staying current enough that
- * nobody reads it as stuck.
- */
-const CLOSE_TTL_MS = 5 * 60_000;
 
 /**
  * Control-plane client. Handles subscriptions, quotes and history requests only - tick
@@ -108,13 +87,9 @@ export class MarketDataClient implements vscode.Disposable {
 	private readonly _onDidChangeSymbolMap = new vscode.EventEmitter<void>();
 	readonly onDidChangeSymbolMap = this._onDidChangeSymbolMap.event;
 
-	/** A cached close arrived for this symbol. Distinct from a quote, which is live. */
-	private readonly _onDidChangeLastClose = new vscode.EventEmitter<string>();
-	readonly onDidChangeLastClose = this._onDidChangeLastClose.event;
-
-	private readonly _closes = new Map<string, { readonly value: LastClose; readonly at: number }>();
-	/** Symbols with a close request in flight, so a repaint storm cannot multiply requests. */
-	private readonly _closeRequests = new Set<string>();
+	private readonly _closes: LastCloseCache;
+	/** A close arrived for this symbol. Distinct from a quote, which is live. */
+	readonly onDidChangeLastClose: vscode.Event<string>;
 
 	/**
 	 * History sources in precedence order; first to claim a symbol answers.
@@ -128,6 +103,10 @@ export class MarketDataClient implements vscode.Disposable {
 	constructor(private readonly _log: Logger) {
 		this._simulator = new SimulatedFeed();
 		this._simulator.onDidProduceQuote(quote => this._applyQuote(quote));
+
+		this._closes = new LastCloseCache(
+			(symbol, timeframe, count) => this.history(symbol, timeframe, count), _log);
+		this.onDidChangeLastClose = this._closes.onDidChange;
 
 		this._sources = [
 			new DaemonSource(
@@ -149,70 +128,13 @@ export class MarketDataClient implements vscode.Disposable {
 	}
 
 	/**
-	 * Last close and its change on the session before, for a symbol with no live quote.
+	 * Last close for a symbol with no live quote, for the watchlist to show instead of nothing.
 	 *
-	 * The watchlist has only ever shown quotes, which arrive from a daemon or from the simulator
-	 * and from nowhere else. Turning the simulator off by default therefore left every row
-	 * reading "no data" with no daemon installed - beside charts drawing real prices from the
-	 * same symbols, which is a poor thing for the workbench to claim about itself.
-	 *
-	 * Returns whatever is cached immediately and refreshes behind it, because this is called
-	 * during a tree repaint that runs on a 250ms timer and must not wait on the network or fire
-	 * a request per paint. `onDidChangeLastClose` reports the arrival.
-	 *
-	 * Never merged into `quotes`. A close is hours or days old for an equity, and a live quote is
-	 * current; storing them together would lose the only distinction that matters here.
+	 * Never merged into `quotes`. A close is hours or days old for an equity and a live quote is
+	 * current; storing them together would lose the only distinction that matters there.
 	 */
 	lastClose(symbol: string): LastClose | undefined {
-		const key = symbol.toUpperCase();
-		const cached = this._closes.get(key);
-		if (!cached || Date.now() - cached.at > CLOSE_TTL_MS) {
-			void this._refreshClose(key);
-		}
-		return cached?.value;
-	}
-
-	private async _refreshClose(symbol: string): Promise<void> {
-		// One request in flight per symbol. Without this a repaint storm would launch a fetch per
-		// paint per row, against services that answer in hundreds of milliseconds.
-		if (this._closeRequests.has(symbol)) {
-			return;
-		}
-		this._closeRequests.add(symbol);
-		try {
-			// Two daily bars: the latest close, and the one to measure it against. For crypto the
-			// latest daily bar is still forming, so its close is the current price - which is
-			// what a watchlist should show for a market that never shuts.
-			const result = await this.history(symbol, '1d', 2);
-			const last = result.bars[result.bars.length - 1];
-			if (!last) {
-				return;
-			}
-			const previous = result.bars.length > 1 ? result.bars[result.bars.length - 2] : undefined;
-			const change = previous ? last.close - previous.close : 0;
-			this._closes.set(symbol, {
-				at: Date.now(),
-				value: {
-					continuous: result.continuous === true,
-					venue: result.venue,
-					quote: {
-						symbol,
-						last: last.close,
-						change,
-						changePercent: previous && previous.close !== 0 ? (change / previous.close) * 100 : 0,
-						timestamp: last.time,
-					},
-				},
-			});
-			this._onDidChangeLastClose.fire(symbol);
-		} catch (error) {
-			// Sources do not throw, so this is a bug rather than a missing series. Swallowed
-			// because a watchlist row is not worth failing a repaint over, but logged so it is
-			// not invisible.
-			this._log.warn(`Last close for ${symbol} failed: ${error instanceof Error ? error.message : String(error)}`);
-		} finally {
-			this._closeRequests.delete(symbol);
-		}
+		return this._closes.get(symbol);
 	}
 
 	get state(): ConnectionState {
@@ -588,5 +510,6 @@ export class MarketDataClient implements vscode.Disposable {
 		this._onDidChangeState.dispose();
 		this._onDidChangeQuote.dispose();
 		this._onDidChangeSymbolMap.dispose();
+		this._closes.dispose();
 	}
 }
