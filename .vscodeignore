@@ -4,8 +4,11 @@ src/**
 preview-src/**
 scripts/**
 
-# icon.png at the root is what ships; this is the vector it was rasterised from.
-resources/**
+# icon.png at the root is what ships; this is the vector it was rasterised from - but the
+# visualizer declarations under resources/ are program material: the New Visualizer command
+# copies them into the user's workspace so their editor can check what they write.
+resources/*
+!resources/quant-visualizer.d.ts
 build.mjs
 eslint.config.mjs
 .vscode-test.mjs
@@ -30,3 +33,6 @@ node_modules/**
 # ship: compiling tests once took the package from 11 files to 53.
 out/**
 !out/extension.js
+# The visualizer worker is spawned by path at runtime, so it has to be in the package. Without
+# this the feature installs and fails on first use with a missing-file error.
+!out/visualizerWorker.mjs

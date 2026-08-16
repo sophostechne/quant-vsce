@@ -31,6 +31,18 @@ export interface Bar {
  */
 export type BarProvenance = 'live' | 'history' | 'simulated';
 
+/** Lines produced by a user's visualizer, already validated by the extension host. */
+export interface VisualizersMessage {
+	type: 'visualizers';
+	series: readonly {
+		readonly label: string;
+		readonly color: string;
+		readonly fill: boolean;
+		readonly overlay: boolean;
+		readonly lines: readonly (readonly (number | undefined)[])[];
+	}[];
+}
+
 export interface IndicatorSpec {
 	type: 'sma' | 'ema' | 'bbands' | 'vwap' | 'rsi' | 'macd' | 'stoch' | 'atr' | 'volume';
 	period?: number;
@@ -85,4 +97,4 @@ export interface ArmToolMessage {
 	text?: string;
 }
 
-export type HostMessage = ConfigMessage | HistoryMessage | TicksMessage | StatusMessage | ArmToolMessage;
+export type HostMessage = ConfigMessage | HistoryMessage | TicksMessage | StatusMessage | ArmToolMessage | VisualizersMessage;

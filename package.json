@@ -2,7 +2,7 @@
 	"name": "quant-workbench",
 	"displayName": "%displayName%",
 	"description": "%description%",
-	"version": "1.7.4",
+	"version": "1.8.0",
 	"publisher": "sophostechne",
 	"license": "MIT",
 	"repository": {
@@ -14,7 +14,7 @@
 		"url": "https://github.com/sophostechne/quant-vsce/issues"
 	},
 	"engines": {
-		"vscode": "^1.90.0"
+		"vscode": "^1.133.0"
 	},
 	"capabilities": {
 		"virtualWorkspaces": false,
@@ -186,6 +186,12 @@
 				"title": "%cmd.newStrategy%",
 				"category": "%cmd.category%",
 				"icon": "$(new-file)"
+			},
+			{
+				"command": "quant.newVisualizer",
+				"title": "%cmd.newVisualizer%",
+				"category": "%cmd.category%",
+				"icon": "$(symbol-method)"
 			}
 		],
 		"menus": {
@@ -376,15 +382,15 @@
 		"test": "npm run compile-tests && npm run compile && vscode-test"
 	},
 	"devDependencies": {
+		"@types/mocha": "^10.0.10",
 		"@types/node": "24.x",
 		"@types/vscode": "^1.90.0",
-		"@vscode/vsce": "^3.2.0",
-		"esbuild": "^0.24.0",
-		"typescript": "^5.7.0",
-		"@types/mocha": "^10.0.10",
 		"@vscode/test-cli": "^0.0.10",
 		"@vscode/test-electron": "^2.4.1",
+		"@vscode/vsce": "^3.2.0",
+		"esbuild": "^0.24.0",
 		"eslint": "^9.17.0",
+		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.19.0"
 	}
 }
