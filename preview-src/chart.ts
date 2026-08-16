@@ -64,6 +64,26 @@ const VISUALIZER_COLORS = ['charts.blue', 'charts.yellow', 'charts.purple', 'cha
 let visualizerBackground: readonly (string | undefined)[] = [];
 /** Notes pinned to bars by a visualizer, indexed like `sourceBars`. */
 let visualizerMarkers: readonly { index: number; text: string; color: string; above: boolean }[] = [];
+/** The bars the visualizer output was computed against. */
+let visualizerToken: string | undefined;
+/** The bars currently on screen. */
+let barsToken: string | undefined;
+
+/**
+ * Whether visualizer output still describes what is drawn.
+ *
+ * Two ways it stops doing so. The bars can be replaced - a new symbol, timeframe or refresh -
+ * which the token catches. And the *style* can aggregate: renko, range and line-break bars
+ * collapse many bars into one, so an array indexed against raw bars no longer lines up with what
+ * is on the canvas. Built-in indicators are computed after the transform and are unaffected;
+ * visualizers run on the host, before it. Drawing anyway would put a regime under the wrong
+ * candles, which is worse than not drawing it.
+ */
+function visualizerOutputApplies(): boolean {
+	return visualizerToken !== undefined
+		&& visualizerToken === barsToken
+		&& bars.length === sourceBars.length;
+}
 let indicatorSeries: IndicatorSeries[] = [];
 let indicatorsDirty = true;
 
@@ -96,7 +116,7 @@ function rebuildIndicators(): void {
 				.filter((series): series is IndicatorSeries => series !== undefined),
 			// After the built-ins so a visualizer's lines sit on top of them, which is what a
 			// user adding one is usually trying to see.
-			...visualizerSeries,
+			...(visualizerOutputApplies() ? visualizerSeries : []),
 		];
 	renderLegend();
 }
@@ -428,6 +448,13 @@ function renderStatus(): void {
 		warn = !dataPlaneHealthy;
 	} else {
 		text = 'no data';
+	}
+
+	// An aggregating style collapses bars, so host-computed overlays no longer line up with what
+	// is drawn. Saying so beats a chart that quietly omits what the user asked it to show.
+	if (visualizerToken !== undefined && visualizerToken === barsToken && bars.length !== sourceBars.length) {
+		text += ' · overlays off (aggregated bars)';
+		warn = true;
 	}
 
 	statusLabel.textContent = text;
@@ -814,7 +841,7 @@ function render(): void {
  * stripes.
  */
 function drawVisualizerBackground(slot: number, plotWidth: number, top: number, height: number): void {
-	if (visualizerBackground.length === 0) {
+	if (visualizerBackground.length === 0 || !visualizerOutputApplies()) {
 		return;
 	}
 	const styles = getComputedStyle(document.body);
@@ -848,7 +875,7 @@ function drawVisualizerBackground(slot: number, plotWidth: number, top: number, 
  * its own chart.
  */
 function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pane, textColor: string): void {
-	if (visualizerMarkers.length === 0) {
+	if (visualizerMarkers.length === 0 || !visualizerOutputApplies()) {
 		return;
 	}
 	const styles = getComputedStyle(document.body);
@@ -1184,7 +1211,9 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			}));
 			visualizerBackground = message.background;
 			visualizerMarkers = message.markers;
+			visualizerToken = message.token;
 			indicatorsDirty = true;
+			renderStatus();
 			render();
 			break;
 
@@ -1199,10 +1228,10 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			following = true;
 			pointer = undefined;
 			updateReadout(undefined);
-			// The old tint and markers were computed against bars that are gone. Keeping them
-			// would paint one instrument's regimes onto another's candles.
-			visualizerBackground = [];
-			visualizerMarkers = [];
+			// Not cleared here. The token decides whether what is held still describes these
+			// bars, which keeps a redraw of unchanged bars from blanking the overlay and
+			// redrawing it a worker later - visible as a blink on every refresh.
+			barsToken = message.token;
 			barsSource = bars.length > 0 ? message.source : undefined;
 			barsVenue = bars.length > 0 ? message.venue : undefined;
 			barsError = message.error;
