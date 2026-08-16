@@ -34,6 +34,8 @@ export type BarProvenance = 'live' | 'history' | 'simulated';
 /** What a user's visualizers drew, already validated by the extension host. */
 export interface VisualizersMessage {
 	type: 'visualizers';
+	/** The bars this was computed against. Drawn only while it matches what is on screen. */
+	token: string;
 	series: readonly {
 		readonly label: string;
 		readonly color: string;
@@ -82,6 +84,8 @@ export interface HistoryMessage {
 	symbol: string;
 	bars: readonly Bar[];
 	source?: BarProvenance;
+	/** Identifies these exact bars, so late-arriving overlays can prove they still match. */
+	token?: string;
 	/** Which venue's prices these are; two crypto sources are not the same instrument. */
 	venue?: string;
 	error?: string;

@@ -137,6 +137,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				source = result.source;
 				void webviewPanel.webview.postMessage({
 					type: 'history', symbol: model.symbol, bars: result.bars, source,
+					token: barsToken(result.bars),
 					...(result.venue ? { venue: result.venue } : {}),
 					// A source that answered and had nothing says so on the chart, rather than
 					// leaving "no data" to be read as a fault.
@@ -165,15 +166,27 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		 * worker and can take a moment or fail, and holding the candles back until user code
 		 * finishes would make someone else's slow script look like slow market data.
 		 */
-		const pushVisualizers = async (bars: readonly unknown[]) => {
+		/**
+		 * Identifies the exact bars an answer was computed against.
+		 *
+		 * Visualizer output arrives after the bars it describes, so the chart needs to know
+		 * whether the two still refer to the same thing. Comparing this instead of clearing on
+		 * every history message means a redraw of unchanged bars keeps what is already on screen
+		 * rather than blanking it and drawing it again a worker later.
+		 */
+		const barsToken = (bars: readonly Bar[]) =>
+			`${model.symbol}|${model.timeframe}|${bars.length}|${bars[bars.length - 1]?.time ?? 0}`;
+
+		const pushVisualizers = async (bars: readonly Bar[]) => {
+			const token = barsToken(bars);
 			const paths = model.visualizers ?? [];
 			if (paths.length === 0 || bars.length === 0) {
-				void webviewPanel.webview.postMessage({ type: 'visualizers', series: [], background: [], markers: [] });
+				void webviewPanel.webview.postMessage({ type: 'visualizers', token, series: [], background: [], markers: [] });
 				return;
 			}
 			const output = await this._visualizers.run(
 				paths, bars, VisualizerRegistry.context(model.symbol, model.timeframe));
-			void webviewPanel.webview.postMessage({ type: 'visualizers', ...output });
+			void webviewPanel.webview.postMessage({ type: 'visualizers', token, ...output });
 		};
 
 		// A visualizer file changed on disk. Only the drawn lines are stale, so the bars stay.
