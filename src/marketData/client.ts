@@ -28,8 +28,16 @@ export interface HistoryResult {
  */
 type Published =
 	| { kind: 'bars'; bars: readonly Bar[] }
+	/** The service answered and does not carry this series. */
 	| { kind: 'absent'; reason: string }
-	| { kind: 'unavailable' };
+	/**
+	 * The service could not be asked at all - unset, unreachable, or erroring.
+	 *
+	 * Carries a reason because this is the case a user cannot diagnose from the chart. It is
+	 * also the only one caused by their configuration rather than by the data, so it is the one
+	 * most worth stating plainly.
+	 */
+	| { kind: 'unavailable'; reason: string };
 
 export const enum ConnectionState {
 	Disconnected,
@@ -272,7 +280,16 @@ export class MarketDataClient implements vscode.Disposable {
 				case 'absent':
 					return { bars: [], source: 'history', reason: published.reason };
 				case 'unavailable':
-					return { bars: this._simulator.history(symbol, timeframe, count), source: 'simulated' };
+					// Deliberately NOT the simulator. A service that could not be asked is a
+					// configuration or network fault, and answering it with invented prices
+					// hides the fault behind a chart that looks entirely normal - the failure
+					// this file already refuses for a 404, on the grounds that a chart of
+					// random numbers is not a better answer than an empty one. It is worse
+					// here, because the user has done nothing to suggest they want a demo.
+					//
+					// Synthetic ticks still drive the UI in this state; only invented *history*
+					// is withdrawn, and the reason is put on the chart in its place.
+					return { bars: [], source: 'history', reason: published.reason };
 			}
 		}
 		if (this._state !== ConnectionState.Connected) {
@@ -285,7 +302,12 @@ export class MarketDataClient implements vscode.Disposable {
 	private async _publishedHistory(symbol: string, timeframe: Timeframe, count: number): Promise<Published> {
 		const base = vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, '');
 		if (!base) {
-			return { kind: 'unavailable' };
+			// The packaged default is a live service, so an empty value was set by someone -
+			// most often a workspace .vscode/settings.json, which beats the user setting
+			// silently. Worth naming the setting: this branch used to return with no log at
+			// all, which made a misconfigured workspace indistinguishable from a network fault.
+			this._log.warn('quant.bars.url is empty, so no published history can be read.');
+			return { kind: 'unavailable', reason: vscode.l10n.t('no bars service configured (quant.bars.url)') };
 		}
 		const url = `${base}/${timeframe}/${encodeURIComponent(symbol.toUpperCase())}.json`;
 		try {
@@ -298,7 +320,7 @@ export class MarketDataClient implements vscode.Disposable {
 			}
 			if (!response.ok) {
 				this._log.warn(`Published history for ${symbol} returned ${response.status}`);
-				return { kind: 'unavailable' };
+				return { kind: 'unavailable', reason: vscode.l10n.t('bars service returned {0}', String(response.status)) };
 			}
 			const series = await response.json() as { bars?: Bar[] };
 			const bars = series.bars ?? [];
@@ -308,8 +330,13 @@ export class MarketDataClient implements vscode.Disposable {
 			// Series are stored whole and oldest first, so the most recent `count` is the tail.
 			return { kind: 'bars', bars: count < bars.length ? bars.slice(-count) : bars };
 		} catch (error) {
-			this._log.warn(`Published history for ${symbol} unavailable: ${error instanceof Error ? error.message : String(error)}`);
-			return { kind: 'unavailable' };
+			const detail = error instanceof Error ? error.message : String(error);
+			// Reaches here when the extension host cannot make the request the shell can: VS
+			// Code's host uses Node's fetch, which ignores the OS proxy unless http.proxy is
+			// set, so a corporate network fails here while curl succeeds. The message is the
+			// only thing that distinguishes that from the service being down.
+			this._log.warn(`Published history for ${symbol} unavailable: ${detail}`);
+			return { kind: 'unavailable', reason: vscode.l10n.t('bars service unreachable: {0}', detail) };
 		}
 	}
 
