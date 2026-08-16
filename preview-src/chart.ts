@@ -620,22 +620,39 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	let min = Infinity;
 	let max = -Infinity;
 	for (const bar of visible) {
-		min = Math.min(min, bar.low);
-		max = Math.max(max, bar.high);
+		if (Number.isFinite(bar.low)) { min = Math.min(min, bar.low); }
+		if (Number.isFinite(bar.high)) { max = Math.max(max, bar.high); }
 	}
 	for (const series of overlays) {
 		for (const line of series.lines) {
 			for (let i = 0; i < viewSize; i++) {
 				const value = line[viewOffset + i];
-				if (value !== undefined) {
+				// Finite rather than merely defined. A single NaN admitted here poisons both
+				// bounds through Math.min/max, and the pane that cannot then be built used to
+				// take the whole chart with it - candles, axes and all.
+				if (value !== undefined && Number.isFinite(value)) {
 					min = Math.min(min, value);
 					max = Math.max(max, value);
 				}
 			}
 		}
 	}
-	if (!isFinite(min) || !isFinite(max) || max === min) {
-		return panes;
+	// A degenerate range is not a reason to draw nothing. Returning no panes blanks the entire
+	// canvas, which reads as a broken extension; a flat window - one bar, an untraded stretch,
+	// a series whose highs and lows coincide - is ordinary data that still deserves candles.
+	// Give it a range to sit in the middle of and carry on.
+	if (!isFinite(min) || !isFinite(max)) {
+		const fallback = visible[visible.length - 1]?.close;
+		if (fallback === undefined || !Number.isFinite(fallback)) {
+			return panes;
+		}
+		min = max = fallback;
+	}
+	if (max === min) {
+		// Proportional so it works at any price, with an absolute floor for a series at zero.
+		const margin = Math.max(Math.abs(min) * 0.01, 1e-6);
+		min -= margin;
+		max += margin;
 	}
 	// Padding is multiplicative on a log scale: a fixed offset would be a large fraction of a
 	// low price and a negligible one of a high price.
@@ -694,7 +711,9 @@ function visibleBounds(series: IndicatorSeries): { min: number; max: number } {
 	let min = Infinity;
 	let max = -Infinity;
 	const consider = (value: number | undefined) => {
-		if (value === undefined) { return; }
+		// Same reason as the price pane: one NaN would otherwise collapse the study to its
+		// fallback 0..1 range and flatten a perfectly good line against the axis.
+		if (value === undefined || !Number.isFinite(value)) { return; }
 		min = Math.min(min, value);
 		max = Math.max(max, value);
 	};
