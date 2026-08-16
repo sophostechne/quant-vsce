@@ -7,37 +7,18 @@ import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
 import { SimulatedFeed } from './simulator';
+import {
+	availableTimeframes, BarSource, CoinbaseSource, DaemonSource, HistorySource, PublishedBarsSource,
+} from './sources';
 
-/** Where a set of bars came from. Mirrors `BarSource` in the webview's protocol. */
-export type BarSource = 'live' | 'history' | 'simulated';
+export type { BarSource };
 
 export interface HistoryResult {
 	readonly bars: readonly Bar[];
 	readonly source: BarSource;
-	/** Why the bars are empty, when the source answered and simply had none. */
+	/** Why the bars are empty, when every source that claimed the symbol had none. */
 	readonly reason?: string;
 }
-
-/**
- * What a published bars service had to say.
- *
- * `absent` and `unavailable` are kept apart because they justify opposite responses. A service
- * that cannot be reached is an outage, and falling back to the simulator keeps the workbench
- * usable. A service that answers 404 has told us something true - this symbol or timeframe is
- * not published - and answering that with invented prices would be a worse chart than none.
- */
-type Published =
-	| { kind: 'bars'; bars: readonly Bar[] }
-	/** The service answered and does not carry this series. */
-	| { kind: 'absent'; reason: string }
-	/**
-	 * The service could not be asked at all - unset, unreachable, or erroring.
-	 *
-	 * Carries a reason because this is the case a user cannot diagnose from the chart. It is
-	 * also the only one caused by their configuration rather than by the data, so it is the one
-	 * most worth stating plainly.
-	 */
-	| { kind: 'unavailable'; reason: string };
 
 export const enum ConnectionState {
 	Disconnected,
@@ -98,9 +79,35 @@ export class MarketDataClient implements vscode.Disposable {
 	private readonly _onDidChangeSymbolMap = new vscode.EventEmitter<void>();
 	readonly onDidChangeSymbolMap = this._onDidChangeSymbolMap.event;
 
+	/**
+	 * History sources in precedence order; first to claim a symbol answers.
+	 *
+	 * The daemon leads because it is the only one with a live tail. Coinbase owns exchange
+	 * pairs, the bars service owns tickers, and they do not overlap - the order between them is
+	 * for readers rather than routing.
+	 */
+	private readonly _sources: readonly HistorySource[];
+
 	constructor(private readonly _log: Logger) {
 		this._simulator = new SimulatedFeed();
 		this._simulator.onDidProduceQuote(quote => this._applyQuote(quote));
+
+		this._sources = [
+			new DaemonSource(
+				() => this._state === ConnectionState.Connected,
+				(symbol, timeframe, count) => this._daemonHistory(symbol, timeframe, count)),
+			new CoinbaseSource(this._log),
+			new PublishedBarsSource(
+				() => vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, ''),
+				this._log,
+				(timeframe, symbol) => vscode.l10n.t('no {0} history published for {1}', timeframe, symbol),
+				() => vscode.l10n.t('no bars service configured (quant.bars.url)')),
+		];
+	}
+
+	/** Timeframes worth offering for a symbol, given who could answer for it right now. */
+	timeframesFor(symbol: string, keep?: Timeframe): readonly Timeframe[] {
+		return availableTimeframes(this._sources, symbol, keep);
 	}
 
 	get state(): ConnectionState {
@@ -279,88 +286,31 @@ export class MarketDataClient implements vscode.Disposable {
 	 * difference would caption real bars as simulated or, far worse, the reverse.
 	 */
 	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
-		// A connected daemon is asked first, because it is the only source with a fresh tail: it
-		// composes live trades onto whatever history it holds, so its last bar is the current
-		// one rather than the last session's.
-		if (this._state === ConnectionState.Connected) {
-			try {
-				const bars = await this._daemonHistory(symbol, timeframe, count);
-				if (bars.length > 0) {
-					return { bars, source: 'live' };
-				}
-				this._log.info(`Daemon holds no ${timeframe} history for ${symbol}; asking published history.`);
-			} catch (error) {
-				// A daemon that cannot answer must never be worse than no daemon at all, and
-				// this is the case where it was. The usual cause is a provider list that does
-				// not claim the symbol - the default is coinbase alone, so any equity rejects
-				// here - and the old code let that rejection reach the chart as an error, on a
-				// symbol the bars service could have filled completely. Running a daemon for
-				// crypto would break equities, which is precisely backwards.
-				const detail = error instanceof Error ? error.message : String(error);
-				this._log.warn(`Daemon history for ${symbol} failed (${detail}); asking published history.`);
+		// Sources in order, first claim wins, and a source that cannot answer lets the next try.
+		// That fall-through is what keeps a connected daemon from ever being worse than none: the
+		// daemon claims everything while connected, so an equity against a coinbase-only provider
+		// list rejects here and the bars service - which could fill it completely - still answers.
+		let reason: string | undefined;
+		for (const source of this._sources) {
+			if (!source.claims(symbol)) {
+				continue;
 			}
+			const result = await source.history(symbol, timeframe, count);
+			if (result.kind === 'bars') {
+				return { bars: result.bars, source: source.provenance };
+			}
+			// Keep the first explanation rather than the last. The earliest source to claim the
+			// symbol is the one the user most expected to answer, so its reason is the one that
+			// describes their situation - a later source's "does not list AAPL" would be true
+			// and beside the point.
+			reason ??= result.reason;
+			this._log.info(`${source.name} could not serve ${symbol} ${timeframe}: ${result.reason}`);
 		}
 
-		// Published history: the workbench's own dataset, and the reason charts work with no
-		// daemon installed at all. Reached whenever the daemon is absent, silent, or does not
-		// carry this symbol.
-		const published = await this._publishedHistory(symbol, timeframe, count);
-		switch (published.kind) {
-			case 'bars':
-				return { bars: published.bars, source: 'history' };
-			case 'absent':
-				return { bars: [], source: 'history', reason: published.reason };
-			case 'unavailable':
-				// Deliberately NOT the simulator. A service that could not be asked is a
-				// configuration or network fault, and answering it with invented prices hides
-				// the fault behind a chart that looks entirely normal - the failure this file
-				// already refuses for a 404, on the grounds that a chart of random numbers is
-				// not a better answer than an empty one. It is worse here, because the user has
-				// done nothing to suggest they want a demo.
-				return { bars: [], source: 'history', reason: published.reason };
-		}
-	}
-
-	/** Asks a published bars service for one series. Never throws; see `Published`. */
-	private async _publishedHistory(symbol: string, timeframe: Timeframe, count: number): Promise<Published> {
-		const base = vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, '');
-		if (!base) {
-			// The packaged default is a live service, so an empty value was set by someone -
-			// most often a workspace .vscode/settings.json, which beats the user setting
-			// silently. Worth naming the setting: this branch used to return with no log at
-			// all, which made a misconfigured workspace indistinguishable from a network fault.
-			this._log.warn('quant.bars.url is empty, so no published history can be read.');
-			return { kind: 'unavailable', reason: vscode.l10n.t('no bars service configured (quant.bars.url)') };
-		}
-		const url = `${base}/${timeframe}/${encodeURIComponent(symbol.toUpperCase())}.json`;
-		try {
-			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-			if (response.status === 404) {
-				// The service is up and says it does not carry this. Reported rather than
-				// replaced: a chart of random numbers is not a better answer than an empty one.
-				this._log.info(`No published ${timeframe} history for ${symbol}`);
-				return { kind: 'absent', reason: vscode.l10n.t('no {0} history published for {1}', timeframe, symbol.toUpperCase()) };
-			}
-			if (!response.ok) {
-				this._log.warn(`Published history for ${symbol} returned ${response.status}`);
-				return { kind: 'unavailable', reason: vscode.l10n.t('bars service returned {0}', String(response.status)) };
-			}
-			const series = await response.json() as { bars?: Bar[] };
-			const bars = series.bars ?? [];
-			if (bars.length === 0) {
-				return { kind: 'absent', reason: vscode.l10n.t('no {0} history published for {1}', timeframe, symbol.toUpperCase()) };
-			}
-			// Series are stored whole and oldest first, so the most recent `count` is the tail.
-			return { kind: 'bars', bars: count < bars.length ? bars.slice(-count) : bars };
-		} catch (error) {
-			const detail = error instanceof Error ? error.message : String(error);
-			// Reaches here when the extension host cannot make the request the shell can: VS
-			// Code's host uses Node's fetch, which ignores the OS proxy unless http.proxy is
-			// set, so a corporate network fails here while curl succeeds. The message is the
-			// only thing that distinguishes that from the service being down.
-			this._log.warn(`Published history for ${symbol} unavailable: ${detail}`);
-			return { kind: 'unavailable', reason: vscode.l10n.t('bars service unreachable: {0}', detail) };
-		}
+		// Nothing had it. Never the simulator: a chart of random numbers is not a better answer
+		// than an empty one, and it is worse when the cause is the user's own configuration,
+		// because a normal-looking chart hides the fault behind the one thing they would trust.
+		return { bars: [], source: 'history', reason: reason ?? vscode.l10n.t('no source carries {0}', symbol.toUpperCase()) };
 	}
 
 	private _daemonHistory(symbol: string, timeframe: Timeframe, count: number): Promise<readonly Bar[]> {
