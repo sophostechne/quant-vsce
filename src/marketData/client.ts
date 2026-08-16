@@ -265,27 +265,45 @@ export class MarketDataClient implements vscode.Disposable {
 	/**
 	 * Bars, and an honest account of where they came from.
 	 *
-	 * Two sources: a daemon when one is connected, and published history over HTTPS otherwise.
-	 * Never the simulator - history is either real or absent with a stated reason, because a
+	 * The workbench draws real history with no daemon installed. That is the ordinary case, not
+	 * a degraded one: published bars are fetched over HTTPS and need nothing running locally.
+	 * A daemon adds a live tail - real-time trades composed onto those bars - so it is asked
+	 * first when present, and falling back to published history when it cannot answer keeps a
+	 * daemon from ever being worse than none.
+	 *
+	 * Never the simulator. History is real or it is absent with a stated reason, because a
 	 * chart is the last place a fabricated price should be able to hide.
 	 *
-	 * The provenance is returned rather than inferred by the caller from connection state. A
-	 * user with no daemon is not necessarily looking at synthetic prices, and a chart that
-	 * cannot tell the difference would caption real bars as simulated or, far worse, the
-	 * reverse. Only the fetch knows which source answered.
+	 * Provenance is returned rather than inferred from connection state: a user with no daemon
+	 * is not necessarily looking at synthetic prices, and a chart that cannot tell the
+	 * difference would caption real bars as simulated or, far worse, the reverse.
 	 */
 	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
+		// A connected daemon is asked first, because it is the only source with a fresh tail: it
+		// composes live trades onto whatever history it holds, so its last bar is the current
+		// one rather than the last session's.
 		if (this._state === ConnectionState.Connected) {
-			return { bars: await this._daemonHistory(symbol, timeframe, count), source: 'live' };
+			try {
+				const bars = await this._daemonHistory(symbol, timeframe, count);
+				if (bars.length > 0) {
+					return { bars, source: 'live' };
+				}
+				this._log.info(`Daemon holds no ${timeframe} history for ${symbol}; asking published history.`);
+			} catch (error) {
+				// A daemon that cannot answer must never be worse than no daemon at all, and
+				// this is the case where it was. The usual cause is a provider list that does
+				// not claim the symbol - the default is coinbase alone, so any equity rejects
+				// here - and the old code let that rejection reach the chart as an error, on a
+				// symbol the bars service could have filled completely. Running a daemon for
+				// crypto would break equities, which is precisely backwards.
+				const detail = error instanceof Error ? error.message : String(error);
+				this._log.warn(`Daemon history for ${symbol} failed (${detail}); asking published history.`);
+			}
 		}
 
-		// Every other state falls back to published history, including Disconnected.
-		//
-		// This used to be reachable only from Simulated, which tied reading a public HTTPS
-		// service to whether a *synthetic feed* was enabled - two settings with nothing to do
-		// with each other. Turning the simulator off therefore took real equity bars down with
-		// it and left "Not connected to a market data daemon" on a chart the service could
-		// have filled. Disabling invented prices must not cost real ones.
+		// Published history: the workbench's own dataset, and the reason charts work with no
+		// daemon installed at all. Reached whenever the daemon is absent, silent, or does not
+		// carry this symbol.
 		const published = await this._publishedHistory(symbol, timeframe, count);
 		switch (published.kind) {
 			case 'bars':
