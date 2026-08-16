@@ -40,8 +40,13 @@ a degraded mode. Point `quant.bars.url` at your own service to use different dat
 Bars stop at the last session's close, so the badge reads *history only* — accurate rather than
 reassuring.
 
-US equities only. The service carries no crypto, so a `BTC-USD` chart says so and needs the
-daemon below.
+Crypto needs no daemon either. `BTC-USD` and other exchange pairs come from Coinbase's public
+candles, which need no credentials — `1m` through `1d`. Because crypto trades continuously the
+newest candle is minutes old rather than a closed session away, so *history only* here means
+nearly current.
+
+Symbols route by shape: a pair ending in a quote currency is an exchange product, anything else
+is a ticker. That is what keeps `BTC-USD` apart from share classes like `BF-B`.
 
 ### Live prices — the daemon
 
@@ -75,10 +80,20 @@ connected, rather than offering a guaranteed empty chart, and widens as soon as 
 
 ### Where a chart's bars come from
 
-A daemon when one is connected and carries the symbol; published history otherwise. If the
-daemon cannot answer — no provider claims the symbol, or it holds no history for it — the chart
-falls back to published bars rather than failing, so adding a daemon can only gain you a live
-tail and never cost you a chart.
+Three sources, tried in order, each owning the symbols it claims:
+
+| Source | Owns | Timeframes | Needs |
+|---|---|---|---|
+| daemon | everything, while connected | all | the daemon running |
+| Coinbase | exchange pairs — `BTC-USD` | `1m`–`1d` | nothing |
+| published bars | tickers — `AAPL` | `5m`–`1d` | nothing |
+
+A source that cannot answer lets the next one try, so adding a daemon can only gain you a live
+tail and never cost you a chart — an equity against a `coinbase`-only provider list falls
+through to published bars rather than failing.
+
+Adding a fourth source is a file implementing `HistorySource` in `src/marketData/sources.ts`;
+the routing and the timeframe picker both derive from the list.
 
 **Never a synthetic feed.** History is real or it is absent with a stated reason, because a
 chart is the last place a fabricated price should be able to hide. A service that cannot be
