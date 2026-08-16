@@ -46,6 +46,17 @@ export interface HistorySource {
 	readonly provenance: BarSource;
 
 	/**
+	 * Which venue's prices these are, shown beside the badge on the chart.
+	 *
+	 * Named because more than one source can answer for one symbol and they are not the same
+	 * instrument. `BTC-USD` from Coinbase and `BTCUSDT` from Binance track closely and are
+	 * different markets in a different unit; equity bars are single-venue IEX rather than the
+	 * consolidated tape. Leaving that unsaid would let a user compare two charts that do not
+	 * mean the same thing.
+	 */
+	readonly venue?: string;
+
+	/**
 	 * Whether this source owns the symbol.
 	 *
 	 * First match wins and order is significant, so a source that claims broadly belongs last.
@@ -173,6 +184,7 @@ const PAGE = 300;
 export class CoinbaseSource implements HistorySource {
 	readonly name = 'coinbase';
 	readonly provenance: BarSource = 'history';
+	readonly venue = 'coinbase';
 
 	constructor(private readonly _log: Logger) { }
 
@@ -248,6 +260,159 @@ export class CoinbaseSource implements HistorySource {
 	}
 }
 
+// -- Binance -----------------------------------------------------------------------------
+
+const BINANCE = 'https://api.binance.com/api/v3/klines';
+
+/** Binance's kline intervals, matched to the set Coinbase serves. */
+const INTERVALS: Partial<Record<Timeframe, string>> = {
+	'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '1d': '1d',
+};
+
+/** One request returns at most this many klines. */
+const BINANCE_LIMIT = 1000;
+
+/**
+ * Coinbase's symbol in Binance's spelling, or undefined when there is no sensible equivalent.
+ *
+ * Binance lists no USD pairs, so a USD quote becomes USDT. That is a substitution rather than a
+ * translation - USDT is a token that tracks the dollar rather than the dollar - which is why the
+ * venue ends up on the chart instead of the two being presented as interchangeable.
+ */
+export function toBinanceSymbol(symbol: string): string | undefined {
+	const upper = symbol.toUpperCase();
+	const dash = upper.lastIndexOf('-');
+	if (dash <= 0) {
+		return undefined;
+	}
+	const base = upper.slice(0, dash);
+	const quote = upper.slice(dash + 1);
+	return `${base}${quote === 'USD' ? 'USDT' : quote}`;
+}
+
+/**
+ * Binance klines, as documented: an array per bar, open time in milliseconds, prices as strings.
+ *
+ * Pure and exported so the mapping can be tested without reaching Binance at all - which matters
+ * here more than usual, because the network this was written on is one Binance refuses.
+ * Malformed rows are dropped rather than coerced: a NaN in a bar propagates silently into every
+ * indicator downstream, where it is far harder to recognise than a missing candle.
+ */
+export function parseBinanceKlines(rows: unknown): Bar[] {
+	if (!Array.isArray(rows)) {
+		return [];
+	}
+	const bars: Bar[] = [];
+	for (const row of rows) {
+		if (!Array.isArray(row) || row.length < 6) {
+			continue;
+		}
+		const time = Number(row[0]);
+		const open = Number(row[1]);
+		const high = Number(row[2]);
+		const low = Number(row[3]);
+		const close = Number(row[4]);
+		const volume = Number(row[5]);
+		if (![time, open, high, low, close, volume].every(Number.isFinite)) {
+			continue;
+		}
+		bars.push({ time, open, high, low, close, volume });
+	}
+	return bars;
+}
+
+/**
+ * Binance klines, as the crypto source of last resort.
+ *
+ * Coinbase and Binance are geo-blocked in opposite places - Binance answers 451 from the network
+ * this was written on, and Coinbase is the one at risk elsewhere - so listing both means crypto
+ * charts resolve by whichever is reachable, per user, with nothing to configure. They are
+ * complements rather than redundancy.
+ *
+ * Second because the pairs are not equivalent: USDT is not USD.
+ */
+export class BinanceSource implements HistorySource {
+	readonly name = 'binance';
+	readonly provenance: BarSource = 'history';
+	readonly venue = 'binance · USDT';
+
+	constructor(private readonly _log: Logger) { }
+
+	claims(symbol: string): boolean {
+		return isExchangeProduct(symbol) && toBinanceSymbol(symbol) !== undefined;
+	}
+
+	/**
+	 * Deliberately the same set Coinbase offers, though Binance also serves 1s klines. The
+	 * picker is a union over sources that *claim* a symbol, and claiming cannot know whether a
+	 * venue is reachable - so offering 1s here would put it in front of every user on the
+	 * strength of an endpoint most of them cannot reach.
+	 */
+	timeframes(): readonly Timeframe[] {
+		return TIMEFRAMES.filter(timeframe => INTERVALS[timeframe] !== undefined);
+	}
+
+	async history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult> {
+		const interval = INTERVALS[timeframe];
+		const product = toBinanceSymbol(symbol);
+		if (interval === undefined || product === undefined) {
+			return { kind: 'absent', reason: `Binance serves no ${timeframe} klines` };
+		}
+
+		const byTime = new Map<number, Bar>();
+		let endTime: number | undefined;
+
+		try {
+			while (byTime.size < count) {
+				const take = Math.min(count - byTime.size, BINANCE_LIMIT);
+				const url = `${BINANCE}?symbol=${encodeURIComponent(product)}&interval=${interval}&limit=${take}`
+					+ (endTime === undefined ? '' : `&endTime=${endTime}`);
+
+				const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+				if (response.status === 451 || response.status === 403) {
+					// Binance states the restriction in the body, and it is worth surfacing
+					// verbatim: "unreachable" would send someone hunting a network fault that
+					// does not exist.
+					return { kind: 'unavailable', reason: `Binance is not available from this location (${response.status})` };
+				}
+				if (response.status === 400) {
+					return { kind: 'absent', reason: `Binance does not list ${product}` };
+				}
+				if (!response.ok) {
+					return { kind: 'unavailable', reason: `Binance returned ${response.status}` };
+				}
+
+				const bars = parseBinanceKlines(await response.json());
+				if (bars.length === 0) {
+					break;
+				}
+				let oldest = Number.POSITIVE_INFINITY;
+				for (const bar of bars) {
+					byTime.set(bar.time, bar);
+					oldest = Math.min(oldest, bar.time);
+				}
+				// endTime is inclusive, so step back one millisecond or the next page repeats
+				// the oldest bar forever.
+				const next = oldest - 1;
+				if (endTime !== undefined && next >= endTime) {
+					break;
+				}
+				endTime = next;
+			}
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this._log.warn(`Binance klines for ${product} unavailable: ${detail}`);
+			return { kind: 'unavailable', reason: `Binance unreachable: ${detail}` };
+		}
+
+		if (byTime.size === 0) {
+			return { kind: 'absent', reason: `Binance returned no ${timeframe} klines for ${product}` };
+		}
+		const bars = [...byTime.values()].sort((left, right) => left.time - right.time);
+		return { kind: 'bars', bars: bars.slice(-count) };
+	}
+}
+
 // -- Published bars service --------------------------------------------------------------
 
 /**
@@ -259,6 +424,8 @@ export class CoinbaseSource implements HistorySource {
 export class PublishedBarsSource implements HistorySource {
 	readonly name = 'published-bars';
 	readonly provenance: BarSource = 'history';
+	/** Named because it is one venue at a few percent of the tape, not the consolidated market. */
+	readonly venue = 'iex';
 
 	constructor(
 		private readonly _baseUrl: () => string,

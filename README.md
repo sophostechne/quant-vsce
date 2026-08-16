@@ -86,7 +86,18 @@ Three sources, tried in order, each owning the symbols it claims:
 |---|---|---|---|
 | daemon | everything, while connected | all | the daemon running |
 | Coinbase | exchange pairs — `BTC-USD` | `1m`–`1d` | nothing |
+| Binance | the same pairs, as `BTCUSDT` | `1m`–`1d` | nothing |
 | published bars | tickers — `AAPL` | `5m`–`1d` | nothing |
+
+Coinbase and Binance are listed together because they are geo-blocked in opposite places —
+Binance answers `451 Unavailable For Legal Reasons` from the US, and Coinbase is the one at risk
+elsewhere. Crypto therefore resolves to whichever is reachable from where you are, with nothing
+to configure. They are complements, not redundancy.
+
+They are not the same instrument, so the chart names which answered: `history only · coinbase`
+against `history only · binance · USDT`. Binance lists no USD pairs, so `BTC-USD` becomes
+`BTCUSDT` — a token that tracks the dollar rather than the dollar. Equity bars are labelled
+`iex` for the same reason: one venue at a few percent of the consolidated tape.
 
 A source that cannot answer lets the next one try, so adding a daemon can only gain you a live
 tail and never cost you a chart — an equity against a `coinbase`-only provider list falls

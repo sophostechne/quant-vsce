@@ -107,6 +107,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				source = result.source;
 				void webviewPanel.webview.postMessage({
 					type: 'history', symbol: model.symbol, bars: result.bars, source,
+					...(result.venue ? { venue: result.venue } : {}),
 					// A source that answered and had nothing says so on the chart, rather than
 					// leaving "no data" to be read as a fault.
 					...(result.reason ? { error: result.reason } : {})
