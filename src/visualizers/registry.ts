@@ -21,7 +21,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
-import { RunResult, VisualizerRunner, VisualizerSeries, workerPath } from './runner';
+import { RunResult, VisualizerMarker, VisualizerOutput, VisualizerRunner, VisualizerSeries, workerPath } from './runner';
 
 /**
  * `.mts` rather than `.ts`: Node only treats a file as a module unambiguously with that
@@ -70,19 +70,31 @@ export class VisualizerRegistry implements vscode.Disposable {
 	 * One failing visualizer does not stop the others: they are independent, and a chart with
 	 * three of them should lose only the broken one. The failure is reported at its own line.
 	 */
-	async run(paths: readonly string[], bars: readonly unknown[], context: VisualizerContext): Promise<VisualizerSeries[]> {
-		const produced: VisualizerSeries[] = [];
+	async run(paths: readonly string[], bars: readonly unknown[], context: VisualizerContext): Promise<VisualizerOutput> {
+		const series: VisualizerSeries[] = [];
+		const markers: VisualizerMarker[] = [];
+		// Later visualizers paint over earlier ones bar by bar, rather than the whole tint being
+		// replaced: two of them can then colour different stretches of the same chart.
+		const background: (string | undefined)[] = [];
+
 		for (const relative of paths) {
 			const uri = this._resolve(relative);
 			if (!uri) {
 				continue;
 			}
 			const result = await this._runOne(uri, bars, context);
-			if (result.kind === 'series') {
-				produced.push(...result.series);
+			if (result.kind !== 'output') {
+				continue;
 			}
+			series.push(...result.output.series);
+			markers.push(...result.output.markers);
+			result.output.background.forEach((color, index) => {
+				if (color) {
+					background[index] = color;
+				}
+			});
 		}
-		return produced;
+		return { series, markers, background };
 	}
 
 	/**

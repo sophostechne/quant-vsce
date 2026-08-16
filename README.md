@@ -78,6 +78,35 @@ because these are single-venue IEX bars and a bucket that fine shows which venue
 than what the instrument did. The chart's timeframe picker hides all three until a daemon is
 connected, rather than offering a guaranteed empty chart, and widens as soon as one is.
 
+### Custom overlays
+
+**Quant: New Visualizer** writes a `.visualizer.mts` into your workspace, copies the type
+declarations beside it, and attaches it to the chart in front of you. Save the file and the
+chart redraws.
+
+```ts
+export default function ribbon(bars: readonly Bar[], ctx: VisualizerContext): VisualizerItem[] {
+  return [{ label: 'Close', lines: [bars.map(bar => bar.close)] }];
+}
+```
+
+Three kinds of thing can come back: **series** (lines, optionally filled, on the price pane or
+their own), **background** (one colour per bar, painted behind the candles — for a state such as
+a regime or a session rather than a value), and **markers** (a note pinned to a bar, for the few
+moments worth looking at).
+
+No build step: Node strips the types when the file is imported, so nothing is compiled and a
+stack trace points at the line you wrote. That is also why `enum`, `namespace` and constructor
+parameter properties are unavailable — erasing them would change behaviour rather than only
+declarations. Errors land in the Problems panel.
+
+It runs in a worker with a two second deadline and a memory cap, so an accidental infinite loop
+costs a message on the chart rather than a frozen editor. Return `undefined` rather than `0` for
+a warm-up window: zeros draw a cliff no price supports, and `NaN`/`Infinity` are converted to
+gaps for the same reason.
+
+Visualizers draw. They are not strategy inputs — backtests run on the engine's genome.
+
 ### Where a chart's bars come from
 
 Three sources, tried in order, each owning the symbols it claims:

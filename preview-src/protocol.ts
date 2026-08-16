@@ -31,7 +31,7 @@ export interface Bar {
  */
 export type BarProvenance = 'live' | 'history' | 'simulated';
 
-/** Lines produced by a user's visualizer, already validated by the extension host. */
+/** What a user's visualizers drew, already validated by the extension host. */
 export interface VisualizersMessage {
 	type: 'visualizers';
 	series: readonly {
@@ -40,6 +40,14 @@ export interface VisualizersMessage {
 		readonly fill: boolean;
 		readonly overlay: boolean;
 		readonly lines: readonly (readonly (number | undefined)[])[];
+	}[];
+	/** One colour per bar, painted behind everything. Undefined leaves a bar untinted. */
+	background: readonly (string | undefined)[];
+	markers: readonly {
+		readonly index: number;
+		readonly text: string;
+		readonly color: string;
+		readonly above: boolean;
 	}[];
 }
 

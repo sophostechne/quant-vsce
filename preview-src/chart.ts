@@ -59,6 +59,11 @@ let visualizerSeries: IndicatorSeries[] = [];
 
 /** Used when a visualizer names no colour, so several lines do not all come out blue. */
 const VISUALIZER_COLORS = ['charts.blue', 'charts.yellow', 'charts.purple', 'charts.orange'];
+
+/** Per-bar tint from a visualizer, indexed like `sourceBars`. */
+let visualizerBackground: readonly (string | undefined)[] = [];
+/** Notes pinned to bars by a visualizer, indexed like `sourceBars`. */
+let visualizerMarkers: readonly { index: number; text: string; color: string; above: boolean }[] = [];
 let indicatorSeries: IndicatorSeries[] = [];
 let indicatorsDirty = true;
 
@@ -718,6 +723,10 @@ function render(): void {
 
 	context.font = '10px var(--vscode-font-family)';
 
+	// Beneath the axes and the candles: a tint is context for the price, never a thing in front
+	// of it.
+	drawVisualizerBackground(slot, plotWidth, price.top, price.height);
+
 	for (const pane of panes) {
 		drawPaneAxis(pane, plotWidth, gridColor, textColor);
 	}
@@ -737,6 +746,8 @@ function render(): void {
 	for (const pane of panes) {
 		drawPaneSeries(pane, visible, slot, upColor, downColor);
 	}
+
+	drawVisualizerMarkers(visible, slot, price, textColor);
 
 	// Rebuilt each paint: it closes over the current viewport, scale and pane geometry.
 	projection = {
@@ -785,6 +796,81 @@ function render(): void {
 }
 
 /** Horizontal gridlines, edge separator and value labels for one pane. */
+/**
+ * Per-bar tint behind the chart.
+ *
+ * Drawn as one rectangle per run of equal colour rather than per bar: a regime holds for dozens
+ * of bars at a time, and abutting fills at fractional pixel boundaries leave seams that read as
+ * stripes.
+ */
+function drawVisualizerBackground(slot: number, plotWidth: number, top: number, height: number): void {
+	if (visualizerBackground.length === 0) {
+		return;
+	}
+	const styles = getComputedStyle(document.body);
+	let runStart = 0;
+	let runColor: string | undefined;
+
+	const flush = (end: number) => {
+		if (runColor === undefined || end <= runStart) {
+			return;
+		}
+		const x = runStart * slot;
+		context.fillStyle = themeColor(styles, runColor);
+		context.fillRect(x, top, Math.min((end - runStart) * slot, plotWidth - x), height);
+	};
+
+	for (let i = 0; i <= viewSize; i++) {
+		const color = visualizerBackground[viewOffset + i];
+		if (color !== runColor || i === viewSize) {
+			flush(i);
+			runStart = i;
+			runColor = color;
+		}
+	}
+}
+
+/**
+ * Notes pinned to bars.
+ *
+ * Only what is on screen, and only one per bar: markers exist to mark the few moments worth
+ * looking at, and a visualizer that emits one per bar would otherwise paint a wall of text over
+ * its own chart.
+ */
+function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pane, textColor: string): void {
+	if (visualizerMarkers.length === 0) {
+		return;
+	}
+	const styles = getComputedStyle(document.body);
+	const drawn = new Set<number>();
+	context.save();
+	context.font = '10px var(--vscode-font-family)';
+	context.textAlign = 'center';
+
+	for (const marker of visualizerMarkers) {
+		const i = marker.index - viewOffset;
+		if (i < 0 || i >= visible.length || drawn.has(i)) {
+			continue;
+		}
+		drawn.add(i);
+		const bar = visible[i]!;
+		const x = i * slot + slot / 2;
+		const y = marker.above ? price.toY(bar.high) - 6 : price.toY(bar.low) + 14;
+
+		const color = marker.color ? themeColor(styles, marker.color) : textColor;
+		const width = context.measureText(marker.text).width;
+		// A chip behind the text, because a bare label over candles is unreadable exactly where
+		// it matters - at a turn, which is busy.
+		context.fillStyle = color;
+		context.globalAlpha = 0.85;
+		context.fillRect(x - width / 2 - 4, y - 10, width + 8, 13);
+		context.globalAlpha = 1;
+		context.fillStyle = styles.getPropertyValue('--vscode-editor-background').trim() || '#1e1e1e';
+		context.fillText(marker.text, x, y);
+	}
+	context.restore();
+}
+
 function drawPaneAxis(pane: Pane, plotWidth: number, gridColor: string, textColor: string): void {
 	context.textBaseline = 'middle';
 	context.textAlign = 'left';
@@ -1086,6 +1172,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 				overlay: series.overlay,
 				lines: series.lines.map(line => [...line]),
 			}));
+			visualizerBackground = message.background;
+			visualizerMarkers = message.markers;
 			indicatorsDirty = true;
 			render();
 			break;
@@ -1101,6 +1189,10 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			following = true;
 			pointer = undefined;
 			updateReadout(undefined);
+			// The old tint and markers were computed against bars that are gone. Keeping them
+			// would paint one instrument's regimes onto another's candles.
+			visualizerBackground = [];
+			visualizerMarkers = [];
 			barsSource = bars.length > 0 ? message.source : undefined;
 			barsVenue = bars.length > 0 ? message.venue : undefined;
 			barsError = message.error;

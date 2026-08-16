@@ -24,8 +24,30 @@ export interface VisualizerSeries {
 	readonly lines: readonly (readonly (number | undefined)[])[];
 }
 
+/** A note pinned to one bar. */
+export interface VisualizerMarker {
+	readonly index: number;
+	readonly text: string;
+	readonly color: string;
+	/** Above the bar's high, rather than below its low. */
+	readonly above: boolean;
+}
+
+/** Everything one visualizer drew. */
+export interface VisualizerOutput {
+	readonly series: readonly VisualizerSeries[];
+	/**
+	 * One colour per bar painted behind the candles, or undefined to leave a bar alone.
+	 *
+	 * Separate from `series` because it carries colours rather than values: a regime, a session,
+	 * a filter being on or off. Drawn beneath everything so price stays the subject.
+	 */
+	readonly background: readonly (string | undefined)[];
+	readonly markers: readonly VisualizerMarker[];
+}
+
 export type RunResult =
-	| { readonly kind: 'series'; readonly series: readonly VisualizerSeries[] }
+	| { readonly kind: 'output'; readonly output: VisualizerOutput }
 	| { readonly kind: 'failed'; readonly message: string; readonly line?: number };
 
 /**
@@ -125,22 +147,61 @@ export function workerPath(extensionPath: string): string {
 function validate(value: unknown): RunResult {
 	const list = Array.isArray(value) ? value : [value];
 	const series: VisualizerSeries[] = [];
+	const markers: VisualizerMarker[] = [];
+	let background: (string | undefined)[] = [];
 
 	for (const [index, entry] of list.entries()) {
 		if (typeof entry !== 'object' || entry === null) {
-			return { kind: 'failed', message: `Series ${index} is not an object. Return { label, lines } or an array of them.` };
+			return fail(`Item ${index} is not an object. Return { label, lines }, or an array of them.`);
 		}
+		const kind = (entry as { kind?: unknown }).kind;
+
+		if (kind === 'background') {
+			const colors = (entry as { colors?: unknown }).colors;
+			if (!Array.isArray(colors)) {
+				return fail(`Item ${index} is a background but has no \`colors\` array.`);
+			}
+			// Last one wins rather than blending: two visualizers tinting the same bar different
+			// colours has no meaningful average, and a muddied result would look like a bug.
+			background = colors.map(color => typeof color === 'string' && color ? color : undefined);
+			continue;
+		}
+
+		if (kind === 'markers') {
+			const list = (entry as { markers?: unknown }).markers;
+			if (!Array.isArray(list)) {
+				return fail(`Item ${index} is markers but has no \`markers\` array.`);
+			}
+			for (const marker of list) {
+				if (typeof marker !== 'object' || marker === null) {
+					continue;
+				}
+				const at = (marker as { index?: unknown }).index;
+				const text = (marker as { text?: unknown }).text;
+				if (typeof at !== 'number' || !Number.isInteger(at) || at < 0 || typeof text !== 'string' || !text) {
+					continue;
+				}
+				markers.push({
+					index: at,
+					text,
+					color: typeof (marker as { color?: unknown }).color === 'string' ? (marker as { color: string }).color : '',
+					above: (marker as { above?: unknown }).above !== false,
+				});
+			}
+			continue;
+		}
+
 		const candidate = entry as Partial<VisualizerSeries>;
 		if (typeof candidate.label !== 'string' || !candidate.label) {
-			return { kind: 'failed', message: `Series ${index} has no label.` };
+			return fail(`Series ${index} has no label.`);
 		}
 		if (!Array.isArray(candidate.lines) || candidate.lines.length === 0) {
-			return { kind: 'failed', message: `Series "${candidate.label}" has no lines. Give it at least one array of values.` };
+			return fail(`Series "${candidate.label}" has no lines. Give it at least one array of values.`);
 		}
 		const lines: (number | undefined)[][] = [];
 		for (const line of candidate.lines) {
 			if (!Array.isArray(line)) {
-				return { kind: 'failed', message: `Series "${candidate.label}" has a line that is not an array.` };
+				return fail(`Series "${candidate.label}" has a line that is not an array.`);
 			}
 			// Anything that is not a finite number becomes a gap. NaN and Infinity are what
 			// arithmetic on a warm-up window produces, and drawing them would put a spike or a
@@ -157,5 +218,9 @@ function validate(value: unknown): RunResult {
 			lines,
 		});
 	}
-	return { kind: 'series', series };
+	return { kind: 'output', output: { series, background, markers } };
+}
+
+function fail(message: string): RunResult {
+	return { kind: 'failed', message };
 }
