@@ -50,6 +50,9 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		this._symbols = this._storage.get<string[]>(STORAGE_KEY) ?? [...DEFAULT_SYMBOLS];
 
 		this._disposables.push(this._client.onDidChangeQuote(quote => { this._dirty.add(quote.symbol); }));
+		// Closes arrive asynchronously after a row has already painted "no data", so the row has
+		// to be told to repaint or it would keep saying that until something else disturbed it.
+		this._disposables.push(this._client.onDidChangeLastClose(symbol => { this._dirty.add(symbol); }));
 		this._disposables.push(this._client.onDidChangeState(() => this._onDidChangeTreeData.fire(undefined)));
 
 		this._startRefreshLoop();
@@ -75,7 +78,9 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 			arguments: [element]
 		};
 
-		const quote = this._client.quotes.get(element.symbol);
+		const live = this._client.quotes.get(element.symbol);
+		// A live quote wins outright; the close is only what to show in its absence.
+		const quote = live ?? this._client.lastClose(element.symbol);
 		if (!quote) {
 			item.description = this._client.state === ConnectionState.Connecting
 				? vscode.l10n.t('connecting…')
@@ -85,6 +90,25 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		}
 
 		const sign = quote.change >= 0 ? '+' : '';
+		if (!live) {
+			// Real prices, but the last one a session closed at rather than one from a moment
+			// ago. Marked on the row rather than left to look live: the whole point of showing
+			// it is that the alternative said "no data" beside a chart drawing the same symbol,
+			// and replacing one wrong impression with another would not be progress.
+			item.description = `${quote.last.toFixed(2)}  ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)  ${vscode.l10n.t('close')}`;
+			item.iconPath = new vscode.ThemeIcon(
+				quote.change >= 0 ? 'arrow-up' : 'arrow-down',
+				new vscode.ThemeColor('descriptionForeground')
+			);
+			item.tooltip = new vscode.MarkdownString(
+				`**${element.symbol}**\n\n` +
+				`Close: ${quote.last.toFixed(2)}\n\n` +
+				`Change: ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)\n\n` +
+				`_Last published close. Connect a daemon for live prices._`
+			);
+			return item;
+		}
+
 		item.description = `${quote.last.toFixed(2)}  ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)`;
 		item.iconPath = new vscode.ThemeIcon(
 			quote.change >= 0 ? 'arrow-up' : 'arrow-down',
