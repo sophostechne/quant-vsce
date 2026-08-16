@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-	Bar, BarSource, FRAME_HEADER_BYTES, FRAME_TYPE_TICK, HostMessage, IndicatorSpec,
+	Bar, BarProvenance, FRAME_HEADER_BYTES, FRAME_TYPE_TICK, HostMessage, IndicatorSpec,
 	TICK_RECORD_BYTES
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
@@ -44,7 +44,7 @@ let repaintQueued = false;
 
 // What is actually on screen, as opposed to what the transport is doing. The badge is derived
 // from these: a connected socket is not evidence that these bars are real.
-let barsSource: BarSource | undefined;
+let barsSource: BarProvenance | undefined;
 let barsVenue: string | undefined;
 let barsError: string | undefined;
 let dataPlaneHealthy = true;

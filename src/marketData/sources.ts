@@ -21,8 +21,8 @@
 import { Logger } from '../logger';
 import { Bar, Timeframe, TIMEFRAMES } from '../protocol';
 
-/** Where a set of bars came from. Mirrors `BarSource` in the webview's protocol. */
-export type BarSource = 'live' | 'history' | 'simulated';
+/** Where a set of bars came from. Mirrors `BarProvenance` in the webview's protocol. */
+export type BarProvenance = 'live' | 'history' | 'simulated';
 
 /**
  * What one source had to say.
@@ -43,7 +43,7 @@ export interface HistorySource {
 	readonly name: string;
 
 	/** What to caption bars from this source as. */
-	readonly provenance: BarSource;
+	readonly provenance: BarProvenance;
 
 	/**
 	 * Which venue's prices these are, shown beside the badge on the chart.
@@ -135,7 +135,7 @@ export function availableTimeframes(
  */
 export class DaemonSource implements HistorySource {
 	readonly name = 'daemon';
-	readonly provenance: BarSource = 'live';
+	readonly provenance: BarProvenance = 'live';
 
 	constructor(
 		private readonly _connected: () => boolean,
@@ -193,7 +193,7 @@ const PAGE = 300;
  */
 export class CoinbaseSource implements HistorySource {
 	readonly name = 'coinbase';
-	readonly provenance: BarSource = 'history';
+	readonly provenance: BarProvenance = 'history';
 	readonly venue = 'coinbase';
 	readonly continuous = true;
 
@@ -344,7 +344,7 @@ export function parseBinanceKlines(rows: unknown): Bar[] {
  */
 export class BinanceSource implements HistorySource {
 	readonly name = 'binance';
-	readonly provenance: BarSource = 'history';
+	readonly provenance: BarProvenance = 'history';
 	readonly venue = 'binance · USDT';
 	readonly continuous = true;
 
@@ -435,7 +435,7 @@ export class BinanceSource implements HistorySource {
  */
 export class PublishedBarsSource implements HistorySource {
 	readonly name = 'published-bars';
-	readonly provenance: BarSource = 'history';
+	readonly provenance: BarProvenance = 'history';
 	/** Named because it is one venue at a few percent of the tape, not the consolidated market. */
 	readonly venue = 'iex';
 	/** Equities keep sessions, so the last daily bar is genuinely closed. */

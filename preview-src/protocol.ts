@@ -29,7 +29,7 @@ export interface Bar {
  * last bar is the last session's, not this second's. It is a different claim from both `live`
  * and `simulated`, and collapsing it into either would misstate what the user is looking at.
  */
-export type BarSource = 'live' | 'history' | 'simulated';
+export type BarProvenance = 'live' | 'history' | 'simulated';
 
 export interface IndicatorSpec {
 	type: 'sma' | 'ema' | 'bbands' | 'vwap' | 'rsi' | 'macd' | 'stoch' | 'atr' | 'volume';
@@ -61,7 +61,7 @@ export interface HistoryMessage {
 	type: 'history';
 	symbol: string;
 	bars: readonly Bar[];
-	source?: BarSource;
+	source?: BarProvenance;
 	/** Which venue's prices these are; two crypto sources are not the same instrument. */
 	venue?: string;
 	error?: string;
