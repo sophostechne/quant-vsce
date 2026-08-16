@@ -6,7 +6,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CHART_VIEW_TYPE, ChartEditorProvider } from './chart/chartEditor';
+import { activeChartDocument, CHART_VIEW_TYPE, ChartEditorProvider } from './chart/chartEditor';
 import { defaultChartContent } from './chart/chartModel';
 import { Logger } from './logger';
 import { ConnectionState, MarketDataClient } from './marketData/client';
@@ -47,12 +47,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(vscode.commands.registerCommand('quant.newVisualizer', () => {
 		// The chart the user is looking at, so a new visualizer is attached to it rather than
-		// created into the void. Undefined when the active editor is not a chart, which the
-		// scaffold reports rather than guessing at which chart was meant.
-		const chart = vscode.window.activeTextEditor?.document.fileName.endsWith('.chart')
-			? vscode.window.activeTextEditor.document
-			: vscode.workspace.textDocuments.find(document => document.fileName.endsWith('.chart'));
-		return newVisualizer(context.extensionUri, chart, log);
+		// created into the void. Undefined when no chart is open, which the scaffold reports
+		// rather than picking one.
+		return newVisualizer(context.extensionUri, activeChartDocument(), log);
 	}));
 	context.subscriptions.push(StrategyEditorProvider.register(context, new StrategyRunner(log), log));
 	context.subscriptions.push(registerIndicatorCommands(log));

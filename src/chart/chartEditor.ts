@@ -26,6 +26,21 @@ const activePanels = new Map<string, vscode.WebviewPanel>();
  */
 const selectedDrawings = new Map<string, number>();
 
+/**
+ * The chart the user last focused.
+ *
+ * Tracked because a chart is a *custom* editor, so `window.activeTextEditor` is undefined while
+ * one has focus - a command that asked the workbench which editor is active would be told
+ * "none" and have to guess, which for New Visualizer meant attaching to whichever chart
+ * happened to be first in `workspace.textDocuments`.
+ */
+let focusedChart: vscode.TextDocument | undefined;
+
+/** The chart document in front of the user, for commands that act on "this chart". */
+export function activeChartDocument(): vscode.TextDocument | undefined {
+	return focusedChart;
+}
+
 /** Index of the drawing selected in the chart for `uri`, if any. */
 export function selectedDrawingIndex(uri: vscode.Uri): number | undefined {
 	return selectedDrawings.get(uri.toString());
@@ -82,6 +97,14 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		let model = parseModel(document, this._log);
 
 		activePanels.set(document.uri.toString(), webviewPanel);
+		if (webviewPanel.active) {
+			focusedChart = document;
+		}
+		disposables.push(webviewPanel.onDidChangeViewState(() => {
+			if (webviewPanel.active) {
+				focusedChart = document;
+			}
+		}));
 
 		const pushConfig = () => {
 			void webviewPanel.webview.postMessage({
@@ -268,6 +291,9 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			if (activePanels.get(document.uri.toString()) === webviewPanel) {
 				activePanels.delete(document.uri.toString());
 				selectedDrawings.delete(document.uri.toString());
+			}
+			if (focusedChart === document) {
+				focusedChart = undefined;
 			}
 			for (const disposable of disposables) {
 				disposable.dispose();
