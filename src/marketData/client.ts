@@ -75,6 +75,8 @@ export class MarketDataClient implements vscode.Disposable {
 	/** A socket attempt is in flight. Tracked separately from state, which stays Simulated across retries. */
 	private _connecting = false;
 	private _suppressAttemptLogs = false;
+	/** This attempt came from the reconnect timer rather than from startup or the user. */
+	private _retrying = false;
 
 	private readonly _subscriptions = new Set<string>();
 	private readonly _quotes = new Map<string, Quote>();
@@ -249,11 +251,21 @@ export class MarketDataClient implements vscode.Disposable {
 		const port = config.get<number>('daemon.port', 8787);
 		const url = `ws://${host}:${port}`;
 
+		// Consumed here so an explicit connect - the command, or startup - still announces itself
+		// while the retry loop behind it stays quiet.
+		const retrying = this._retrying;
+		this._retrying = false;
+
 		this._connecting = true;
-		// While the simulator is driving, keep reporting Simulated across retry attempts.
-		// Flipping to Connecting every few seconds would make the status bar strobe and would
-		// briefly claim the synthetic prices on screen are real.
-		if (this._state !== ConnectionState.Simulated) {
+		// Announce Connecting only when it is news.
+		//
+		// Against an absent daemon this runs every few seconds forever, and every consumer that
+		// repaints on state repaints with it: the status bar strobes, and the watchlist used to
+		// reload its whole tree, which flashes the view's progress bar in time with the retry.
+		// The guard used to cover only Simulated, because that was what "no daemon" meant until
+		// the synthetic feed became opt-in - now it usually means Disconnected, and the loop
+		// went straight through.
+		if (!retrying && this._state !== ConnectionState.Simulated) {
 			this._setState(ConnectionState.Connecting);
 		}
 		this._logAttempt(`Connecting to market data daemon at ${url}`);
@@ -509,7 +521,10 @@ export class MarketDataClient implements vscode.Disposable {
 
 	private _scheduleReconnect(): void {
 		this._clearReconnect();
-		this._reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+		this._reconnectTimer = setTimeout(() => {
+			this._retrying = true;
+			this.connect();
+		}, RECONNECT_DELAY_MS);
 	}
 
 	private _clearReconnect(): void {

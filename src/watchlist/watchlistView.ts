@@ -8,9 +8,9 @@ import { ConnectionState, MarketDataClient } from '../marketData/client';
 
 const STORAGE_KEY = 'quant.watchlist.symbols';
 /**
- * Crypto is included because the default daemon provider is Coinbase, which trades
- * continuously - so a fresh profile shows real prices at any hour. The equities entries only
- * resolve once an equities provider is configured, and read as "no data" until then.
+ * Both asset classes resolve on a fresh profile with nothing installed: equities from the
+ * published bars service, crypto from Coinbase or Binance. Crypto earns its place by trading
+ * continuously, so the list is not entirely stale outside market hours.
  */
 const DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'SPY', 'BTC-USD', 'ETH-USD'];
 
@@ -53,7 +53,15 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		// Closes arrive asynchronously after a row has already painted "no data", so the row has
 		// to be told to repaint or it would keep saying that until something else disturbed it.
 		this._disposables.push(this._client.onDidChangeLastClose(symbol => { this._dirty.add(symbol); }));
-		this._disposables.push(this._client.onDidChangeState(() => this._onDidChangeTreeData.fire(undefined)));
+		// A connection change alters what each row shows, never which rows exist, so the rows are
+		// marked for repaint rather than the tree reloaded. Reloading rebuilds identical
+		// structure and flashes the view's progress bar - and against an absent daemon that
+		// meant flashing it every few seconds for as long as the window stayed open.
+		this._disposables.push(this._client.onDidChangeState(() => {
+			for (const symbol of this._symbols) {
+				this._dirty.add(symbol);
+			}
+		}));
 
 		this._startRefreshLoop();
 		this._disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
