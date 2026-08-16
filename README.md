@@ -33,12 +33,15 @@ strategy forward all report that no interpreter is configured.
 ### Historical charts, with nothing installed
 
 Charts draw real historical prices out of the box, with no daemon and no credentials — bars come
-from `https://bars.sophostechne.com`, which serves IEX data derived from published captures.
-Point `quant.bars.url` at your own service to use different data, or empty it to fall back to the
-simulated feed.
+from `https://bars.sophostechne.com`, which serves IEX data derived from published captures. The
+extension fetches them over HTTPS itself, so this is the ordinary way to use the workbench, not
+a degraded mode. Point `quant.bars.url` at your own service to use different data.
 
 Bars stop at the last session's close, so the badge reads *history only* — accurate rather than
 reassuring.
+
+US equities only. The service carries no crypto, so a `BTC-USD` chart says so and needs the
+daemon below.
 
 ### Live prices — the daemon
 
@@ -50,15 +53,38 @@ Defaults to `127.0.0.1:8787`, which is where the extension looks; change that wi
 `quant.daemon.host` and `quant.daemon.port`. Providers, credentials and tuning are documented
 in the [daemon repository](https://github.com/sophostechne/quant-daemon).
 
-### What a chart falls back to
+Install this only when you want prices that move. What it costs depends on the asset:
 
-In order: a daemon, then published history, then a synthetic feed. The last is a seeded random
-walk that **must not be traded on** — the status bar reads *Simulated* and charts carry a
-`simulated data` badge. Turn it off with `quant.daemon.allowSimulatedFeed: false`.
+| | Real-time needs |
+|---|---|
+| **Crypto** | nothing — Coinbase is the default provider and needs no account |
+| **US equities** | your own broker credentials, e.g. an Alpaca account: `--provider coinbase,alpaca,bars` |
 
-The badge always names the actual source of the bars on screen rather than the state of the
-connection, because with no daemon those two stopped meaning the same thing: real published
-history and invented prices are both reachable, and only the fetch knows which answered.
+Equity ticks are the part that cannot be given away: every real-time US equity feed is licensed
+per subscriber, which is why the workbench ships history rather than a live tape. Bars derived
+from IEX captures may be redistributed, so the service carries those and leaves live prices to
+a provider you hold credentials for.
+
+Put `bars` last in the provider list so it claims only what the live feed did not.
+
+### Where a chart's bars come from
+
+A daemon when one is connected and carries the symbol; published history otherwise. If the
+daemon cannot answer — no provider claims the symbol, or it holds no history for it — the chart
+falls back to published bars rather than failing, so adding a daemon can only gain you a live
+tail and never cost you a chart.
+
+**Never a synthetic feed.** History is real or it is absent with a stated reason, because a
+chart is the last place a fabricated price should be able to hide. A service that cannot be
+reached says `bars service unreachable: …`; one that is not configured says `no bars service
+configured (quant.bars.url)`. Neither draws anything.
+
+`quant.daemon.allowSimulatedFeed` is off by default and, when enabled, produces synthetic
+**ticks** only — never bars. It is a development aid and **must not be traded on**.
+
+The badge names the actual source of the bars on screen rather than the state of the connection,
+because with no daemon those two stopped meaning the same thing: only the fetch knows which
+source answered.
 
 ## Architecture
 
