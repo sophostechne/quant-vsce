@@ -142,8 +142,15 @@ function themeColor(styles: CSSStyleDeclaration, color: string): string {
 	if (color && !THEME_COLOR_ID.test(color)) {
 		return color;
 	}
-	return styles.getPropertyValue(`--vscode-${color.replace('.', '-')}`).trim()
-		|| styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
+	// Nothing to look up, and `color.replace` on a non-string throws. Worth guarding rather than
+	// trusting the type: this runs inside `render`, after the canvas has been cleared and before
+	// the candles are drawn, so anything that throws here does not lose a tint - it leaves the
+	// whole chart blank until something changes, which is how a colour bug becomes a missing chart.
+	const fallback = () => styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
+	if (typeof color !== 'string' || !color) {
+		return fallback();
+	}
+	return styles.getPropertyValue(`--vscode-${color.replace('.', '-')}`).trim() || fallback();
 }
 
 function renderLegend(atIndex?: number): void {
@@ -1202,14 +1209,19 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 		case 'visualizers':
 			// Palette ids resolve to a real colour here, where the theme is; the host only knows
 			// the name. A visualizer that chose its own colour keeps it.
+			//
+			// The nulls become undefined in the same pass. They are holes the host sent as
+			// undefined and JSON turned into null, and everything downstream - the axis bounds,
+			// the line breaks, the tint runs - asks `=== undefined`. Restoring the invariant here,
+			// at the one boundary that loses it, is what keeps every one of those checks honest.
 			visualizerSeries = message.series.map((series, index) => ({
 				label: series.label,
 				color: series.color || VISUALIZER_COLORS[index % VISUALIZER_COLORS.length]!,
 				fill: series.fill,
 				overlay: series.overlay,
-				lines: series.lines.map(line => [...line]),
+				lines: series.lines.map(line => line.map(value => value ?? undefined)),
 			}));
-			visualizerBackground = message.background;
+			visualizerBackground = message.background.map(color => color ?? undefined);
 			visualizerMarkers = message.markers;
 			visualizerToken = message.token;
 			indicatorsDirty = true;
