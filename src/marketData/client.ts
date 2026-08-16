@@ -8,7 +8,8 @@ import { Logger } from '../logger';
 import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
 import { SimulatedFeed } from './simulator';
 import {
-	availableTimeframes, BarSource, CoinbaseSource, DaemonSource, HistorySource, PublishedBarsSource,
+	availableTimeframes, BarSource, BinanceSource, CoinbaseSource, DaemonSource, HistorySource,
+	PublishedBarsSource,
 } from './sources';
 
 export type { BarSource };
@@ -18,6 +19,8 @@ export interface HistoryResult {
 	readonly source: BarSource;
 	/** Why the bars are empty, when every source that claimed the symbol had none. */
 	readonly reason?: string;
+	/** Which venue answered, when more than one could have. */
+	readonly venue?: string;
 }
 
 export const enum ConnectionState {
@@ -115,6 +118,7 @@ export class MarketDataClient implements vscode.Disposable {
 				() => this._state === ConnectionState.Connected,
 				(symbol, timeframe, count) => this._daemonHistory(symbol, timeframe, count)),
 			new CoinbaseSource(this._log),
+			new BinanceSource(this._log),
 			new PublishedBarsSource(
 				() => vscode.workspace.getConfiguration('quant').get<string>('bars.url', '').trim().replace(/\/$/, ''),
 				this._log,
@@ -378,7 +382,7 @@ export class MarketDataClient implements vscode.Disposable {
 			}
 			const result = await source.history(symbol, timeframe, count);
 			if (result.kind === 'bars') {
-				return { bars: result.bars, source: source.provenance };
+				return { bars: result.bars, source: source.provenance, venue: source.venue };
 			}
 			// Keep the first explanation rather than the last. The earliest source to claim the
 			// symbol is the one the user most expected to answer, so its reason is the one that

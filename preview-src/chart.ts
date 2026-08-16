@@ -45,6 +45,7 @@ let repaintQueued = false;
 // What is actually on screen, as opposed to what the transport is doing. The badge is derived
 // from these: a connected socket is not evidence that these bars are real.
 let barsSource: BarSource | undefined;
+let barsVenue: string | undefined;
 let barsError: string | undefined;
 let dataPlaneHealthy = true;
 
@@ -370,7 +371,12 @@ function renderStatus(): void {
 	} else if (barsSource === 'history') {
 		// Real prices, but the last bar closed with the last session rather than a moment ago.
 		// Not a warning: nothing here is wrong or invented, it simply is not streaming.
-		text = 'history only';
+		//
+		// The venue is named because more than one source can answer for one symbol and they are
+		// not the same instrument - BTC-USD on Coinbase against BTCUSDT on Binance, or IEX
+		// against the consolidated tape. Two charts that do not mean the same thing should not
+		// look identical.
+		text = barsVenue ? `history only · ${barsVenue}` : 'history only';
 		warn = false;
 	} else if (barsSource === 'live') {
 		text = dataPlaneHealthy ? 'live' : 'live (stream disconnected)';
@@ -1053,6 +1059,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			pointer = undefined;
 			updateReadout(undefined);
 			barsSource = bars.length > 0 ? message.source : undefined;
+			barsVenue = bars.length > 0 ? message.venue : undefined;
 			barsError = message.error;
 			previousClose = bars.length > 1 ? bars[bars.length - 2]!.close : 0;
 			lastPrice = bars.length > 0 ? bars[bars.length - 1]!.close : 0;

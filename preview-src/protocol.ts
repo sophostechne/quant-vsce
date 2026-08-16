@@ -62,6 +62,8 @@ export interface HistoryMessage {
 	symbol: string;
 	bars: readonly Bar[];
 	source?: BarSource;
+	/** Which venue's prices these are; two crypto sources are not the same instrument. */
+	venue?: string;
 	error?: string;
 }
 
