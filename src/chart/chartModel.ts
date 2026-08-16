@@ -58,6 +58,14 @@ export interface ChartDocumentModel {
 	timeframe: Timeframe;
 	bars: number;
 	indicators: IndicatorSpec[];
+	/**
+	 * Workspace-relative paths of `.visualizer.mts` files this chart draws.
+	 *
+	 * Named by the document rather than discovered globally, so opening a chart tells you what
+	 * it needs and two charts in one workspace can draw different things. Relative so a chart
+	 * committed alongside its visualizers still resolves on someone else's machine.
+	 */
+	visualizers?: string[];
 	drawings: Drawing[];
 	/**
 	 * Fraction of the plot height taken by each study pane, in order. The price pane keeps the
@@ -252,6 +260,7 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 			timeframe,
 			bars: typeof parsed.bars === 'number' && parsed.bars > 0 ? Math.min(parsed.bars, 5_000) : DEFAULT_MODEL.bars,
 			indicators: parseIndicators(parsed.indicators, log),
+			visualizers: parseVisualizers(parsed.visualizers),
 			drawings: parseDrawings(parsed.drawings),
 			paneHeights: parsePaneHeights(parsed.paneHeights)
 		};
@@ -259,6 +268,22 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 		log.warn(`${document.uri.fsPath} is not valid JSON; using defaults.`);
 		return { ...DEFAULT_MODEL };
 	}
+}
+
+/**
+ * Paths are kept as written apart from being trimmed. Normalising them here - resolving `..`,
+ * or rewriting separators - would silently rewrite the user's file on the next save, and a path
+ * that does not resolve is reported against the chart rather than repaired behind their back.
+ */
+function parseVisualizers(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const paths = value
+		.filter((entry): entry is string => typeof entry === 'string')
+		.map(entry => entry.trim())
+		.filter(entry => entry.length > 0);
+	return paths.length > 0 ? paths : undefined;
 }
 
 export async function writeModel(document: vscode.TextDocument, model: ChartDocumentModel): Promise<void> {

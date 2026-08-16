@@ -17,6 +17,8 @@ import { STRATEGY_VIEW_TYPE, StrategyEditorProvider } from './strategy/strategyE
 import { defaultStrategyContent } from './strategy/strategyModel';
 import { StrategyRunner } from './strategy/strategyRunner';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
+import { VisualizerRegistry } from './visualizers/registry';
+import { newVisualizer } from './visualizers/scaffold';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const log = new Logger('Quant');
@@ -39,7 +41,19 @@ export function activate(context: vscode.ExtensionContext): void {
 		showCollapseAll: true
 	}));
 
-	context.subscriptions.push(ChartEditorProvider.register(context, client, log));
+	const visualizers = new VisualizerRegistry(context.extensionPath, log);
+	context.subscriptions.push(visualizers);
+	context.subscriptions.push(ChartEditorProvider.register(context, client, visualizers, log));
+
+	context.subscriptions.push(vscode.commands.registerCommand('quant.newVisualizer', () => {
+		// The chart the user is looking at, so a new visualizer is attached to it rather than
+		// created into the void. Undefined when the active editor is not a chart, which the
+		// scaffold reports rather than guessing at which chart was meant.
+		const chart = vscode.window.activeTextEditor?.document.fileName.endsWith('.chart')
+			? vscode.window.activeTextEditor.document
+			: vscode.workspace.textDocuments.find(document => document.fileName.endsWith('.chart'));
+		return newVisualizer(context.extensionUri, chart, log);
+	}));
 	context.subscriptions.push(StrategyEditorProvider.register(context, new StrategyRunner(log), log));
 	context.subscriptions.push(registerIndicatorCommands(log));
 	context.subscriptions.push(createStatusBarItem(client));

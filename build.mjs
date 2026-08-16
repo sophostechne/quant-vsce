@@ -34,6 +34,26 @@ const host = {
 };
 
 /**
+ * The visualizer worker: ESM, because it loads user code with a dynamic `import()` of a data
+ * URL and top-level `await`. Emitted as `.mjs` so Node treats it as a module regardless of the
+ * package type, which a `.js` beside a CommonJS package.json would not.
+ *
+ * Bundled separately rather than folded into the host: it is spawned by path, and sucrase - the
+ * only reason this extension has a runtime dependency at all - belongs here rather than in the
+ * bundle that loads on activation.
+ */
+const visualizerWorker = {
+	entryPoints: [path.join(root, 'src', 'visualizers', 'worker.mts')],
+	outfile: path.join(root, 'out', 'visualizerWorker.mjs'),
+	bundle: true,
+	format: 'esm',
+	platform: 'node',
+	target: 'node20',
+	minify: production,
+	sourcemap: !production
+};
+
+/**
  * The webviews: ESM, browser platform, one bundle per view beside its own stylesheet.
  *
  * Keyed by output path so `media/chart/chart.js` lands next to `media/chart/chart.css`, which
@@ -55,10 +75,10 @@ const webviews = {
 };
 
 if (watch) {
-	const contexts = await Promise.all([esbuild.context(host), esbuild.context(webviews)]);
+	const contexts = await Promise.all([esbuild.context(host), esbuild.context(visualizerWorker), esbuild.context(webviews)]);
 	await Promise.all(contexts.map(context => context.watch()));
 	console.log('watching');
 } else {
-	await Promise.all([esbuild.build(host), esbuild.build(webviews)]);
+	await Promise.all([esbuild.build(host), esbuild.build(visualizerWorker), esbuild.build(webviews)]);
 	console.log('built');
 }

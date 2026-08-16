@@ -4,8 +4,11 @@
 		"lib": [
 			"ES2024"
 		],
-		"module": "commonjs",
-		"moduleResolution": "node",
+		"module": "preserve",
+		// bundler resolution because esbuild is what actually builds this; tsc only checks.
+		// node10 was removed in TypeScript 7 and this is its correct successor for a bundled
+		// extension - extensionless imports keep working, which node16 would have broken.
+		"moduleResolution": "bundler",
 		"esModuleInterop": true,
 		"strict": true,
 		"noImplicitAny": true,

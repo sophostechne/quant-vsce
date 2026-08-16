@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { BarProvenance, ConnectionState, MarketDataClient } from '../marketData/client';
 import { Bar, Tick, Timeframe } from '../protocol';
+import { VisualizerRegistry } from '../visualizers/registry';
 import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
@@ -48,10 +49,15 @@ export function postToChart(uri: vscode.Uri, message: unknown): boolean {
  */
 export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 
-	static register(context: vscode.ExtensionContext, client: MarketDataClient, log: Logger): vscode.Disposable {
+	static register(
+		context: vscode.ExtensionContext,
+		client: MarketDataClient,
+		visualizers: VisualizerRegistry,
+		log: Logger
+	): vscode.Disposable {
 		return vscode.window.registerCustomEditorProvider(
 			CHART_VIEW_TYPE,
-			new ChartEditorProvider(context, client, log),
+			new ChartEditorProvider(context, client, visualizers, log),
 			{ webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: true }
 		);
 	}
@@ -59,6 +65,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 	private constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _client: MarketDataClient,
+		private readonly _visualizers: VisualizerRegistry,
 		private readonly _log: Logger
 	) { }
 
@@ -112,6 +119,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 					// leaving "no data" to be read as a fault.
 					...(result.reason ? { error: result.reason } : {})
 				});
+				await pushVisualizers(result.bars);
 			} catch (error) {
 				this._log.error(`History for ${model.symbol} failed`, error);
 				// Send an empty series so the chart discards whatever it was showing. Keeping
@@ -126,6 +134,31 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				});
 			}
 		};
+
+		/**
+		 * Runs the chart's visualizers and sends what they drew.
+		 *
+		 * A separate message from the bars rather than part of them: a visualizer runs in a
+		 * worker and can take a moment or fail, and holding the candles back until user code
+		 * finishes would make someone else's slow script look like slow market data.
+		 */
+		const pushVisualizers = async (bars: readonly unknown[]) => {
+			const paths = model.visualizers ?? [];
+			if (paths.length === 0 || bars.length === 0) {
+				void webviewPanel.webview.postMessage({ type: 'visualizers', series: [] });
+				return;
+			}
+			const series = await this._visualizers.run(
+				paths, bars, VisualizerRegistry.context(model.symbol, model.timeframe));
+			void webviewPanel.webview.postMessage({ type: 'visualizers', series });
+		};
+
+		// A visualizer file changed on disk. Only the drawn lines are stale, so the bars stay.
+		disposables.push(this._visualizers.onDidChange(() => {
+			void this._client.history(model.symbol, model.timeframe, model.bars)
+				.then(result => pushVisualizers(result.bars))
+				.catch(() => { /* the history path reports its own failures */ });
+		}));
 
 		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[]; drawings?: Drawing[]; index?: number }) => {
 			switch (message.type) {

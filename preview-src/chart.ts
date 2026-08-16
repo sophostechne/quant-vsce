@@ -51,6 +51,14 @@ let dataPlaneHealthy = true;
 
 // Indicators are recomputed only when the bars or the specs change, never per frame.
 let indicatorSpecs: readonly IndicatorSpec[] = [];
+/**
+ * Lines from the user's visualizers, kept apart from `indicatorSeries` because they arrive on
+ * their own message and outlive a redraw of the built-in indicators.
+ */
+let visualizerSeries: IndicatorSeries[] = [];
+
+/** Used when a visualizer names no colour, so several lines do not all come out blue. */
+const VISUALIZER_COLORS = ['charts.blue', 'charts.yellow', 'charts.purple', 'charts.orange'];
 let indicatorSeries: IndicatorSeries[] = [];
 let indicatorsDirty = true;
 
@@ -77,10 +85,30 @@ function rebuildIndicators(): void {
 	indicatorsDirty = false;
 	indicatorSeries = bars.length === 0
 		? []
-		: indicatorSpecs
-			.map((spec, index) => computeIndicator(spec, bars, index))
-			.filter((series): series is IndicatorSeries => series !== undefined);
+		: [
+			...indicatorSpecs
+				.map((spec, index) => computeIndicator(spec, bars, index))
+				.filter((series): series is IndicatorSeries => series !== undefined),
+			// After the built-ins so a visualizer's lines sit on top of them, which is what a
+			// user adding one is usually trying to see.
+			...visualizerSeries,
+		];
 	renderLegend();
+}
+
+/**
+ * A theme colour id such as `charts.blue`, or any literal CSS colour.
+ *
+ * Built-in indicators name theme ids so they stay legible when the theme changes. A visualizer
+ * is user code and may simply want `#c0ffee`, so anything without a dot is passed through as
+ * written rather than looked up and lost.
+ */
+function themeColor(styles: CSSStyleDeclaration, color: string): string {
+	if (color && !color.includes('.')) {
+		return color;
+	}
+	return styles.getPropertyValue(`--vscode-${color.replace('.', '-')}`).trim()
+		|| styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
 }
 
 function renderLegend(atIndex?: number): void {
@@ -99,7 +127,9 @@ function renderLegend(atIndex?: number): void {
 			}
 		}
 		chip.textContent = text;
-		chip.style.color = `var(--vscode-${series.color.replace('.', '-')})`;
+		chip.style.color = series.color.includes('.')
+			? `var(--vscode-${series.color.replace('.', '-')})`
+			: series.color;
 		legendLabel.appendChild(chip);
 	}
 }
@@ -814,8 +844,7 @@ function drawPaneSeries(pane: Pane, visible: readonly Bar[], slot: number, upCol
 	const styles = getComputedStyle(document.body);
 
 	for (const series of pane.series) {
-		const color = styles.getPropertyValue(`--vscode-${series.color.replace('.', '-')}`).trim()
-			|| styles.getPropertyValue('--vscode-charts-blue').trim() || '#4e94ce';
+		const color = themeColor(styles, series.color);
 
 		if (series.histogram) {
 			const zeroY = pane.toY(Math.max(pane.min, Math.min(0, pane.max)));
@@ -1046,6 +1075,20 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 			renderStatus();
 			break;
 		}
+
+		case 'visualizers':
+			// Palette ids resolve to a real colour here, where the theme is; the host only knows
+			// the name. A visualizer that chose its own colour keeps it.
+			visualizerSeries = message.series.map((series, index) => ({
+				label: series.label,
+				color: series.color || VISUALIZER_COLORS[index % VISUALIZER_COLORS.length]!,
+				fill: series.fill,
+				overlay: series.overlay,
+				lines: series.lines.map(line => [...line]),
+			}));
+			indicatorsDirty = true;
+			render();
+			break;
 
 		case 'history':
 			sourceBars = message.bars.map(bar => ({ ...bar }));
