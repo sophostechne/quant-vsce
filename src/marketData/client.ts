@@ -265,37 +265,42 @@ export class MarketDataClient implements vscode.Disposable {
 	/**
 	 * Bars, and an honest account of where they came from.
 	 *
-	 * Three sources in descending order of truth: a daemon, published history over HTTPS, and
-	 * the simulator. The middle one is why this returns its provenance rather than letting the
-	 * caller infer it from connection state - a user with no daemon is no longer necessarily
-	 * looking at synthetic prices, and a chart that cannot tell the difference would caption
-	 * real bars as simulated or, far worse, the reverse.
+	 * Two sources: a daemon when one is connected, and published history over HTTPS otherwise.
+	 * Never the simulator - history is either real or absent with a stated reason, because a
+	 * chart is the last place a fabricated price should be able to hide.
+	 *
+	 * The provenance is returned rather than inferred by the caller from connection state. A
+	 * user with no daemon is not necessarily looking at synthetic prices, and a chart that
+	 * cannot tell the difference would caption real bars as simulated or, far worse, the
+	 * reverse. Only the fetch knows which source answered.
 	 */
 	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
-		if (this._state === ConnectionState.Simulated) {
-			const published = await this._publishedHistory(symbol, timeframe, count);
-			switch (published.kind) {
-				case 'bars':
-					return { bars: published.bars, source: 'history' };
-				case 'absent':
-					return { bars: [], source: 'history', reason: published.reason };
-				case 'unavailable':
-					// Deliberately NOT the simulator. A service that could not be asked is a
-					// configuration or network fault, and answering it with invented prices
-					// hides the fault behind a chart that looks entirely normal - the failure
-					// this file already refuses for a 404, on the grounds that a chart of
-					// random numbers is not a better answer than an empty one. It is worse
-					// here, because the user has done nothing to suggest they want a demo.
-					//
-					// Synthetic ticks still drive the UI in this state; only invented *history*
-					// is withdrawn, and the reason is put on the chart in its place.
-					return { bars: [], source: 'history', reason: published.reason };
-			}
+		if (this._state === ConnectionState.Connected) {
+			return { bars: await this._daemonHistory(symbol, timeframe, count), source: 'live' };
 		}
-		if (this._state !== ConnectionState.Connected) {
-			throw new Error('Not connected to a market data daemon.');
+
+		// Every other state falls back to published history, including Disconnected.
+		//
+		// This used to be reachable only from Simulated, which tied reading a public HTTPS
+		// service to whether a *synthetic feed* was enabled - two settings with nothing to do
+		// with each other. Turning the simulator off therefore took real equity bars down with
+		// it and left "Not connected to a market data daemon" on a chart the service could
+		// have filled. Disabling invented prices must not cost real ones.
+		const published = await this._publishedHistory(symbol, timeframe, count);
+		switch (published.kind) {
+			case 'bars':
+				return { bars: published.bars, source: 'history' };
+			case 'absent':
+				return { bars: [], source: 'history', reason: published.reason };
+			case 'unavailable':
+				// Deliberately NOT the simulator. A service that could not be asked is a
+				// configuration or network fault, and answering it with invented prices hides
+				// the fault behind a chart that looks entirely normal - the failure this file
+				// already refuses for a 404, on the grounds that a chart of random numbers is
+				// not a better answer than an empty one. It is worse here, because the user has
+				// done nothing to suggest they want a demo.
+				return { bars: [], source: 'history', reason: published.reason };
 		}
-		return { bars: await this._daemonHistory(symbol, timeframe, count), source: 'live' };
 	}
 
 	/** Asks a published bars service for one series. Never throws; see `Published`. */
@@ -418,7 +423,10 @@ export class MarketDataClient implements vscode.Disposable {
 	}
 
 	private _fallBackToSimulator(): void {
-		const allowed = vscode.workspace.getConfiguration('quant').get<boolean>('daemon.allowSimulatedFeed', true);
+		// Opt-in. Synthetic ticks are a development aid, and defaulting them on meant the one
+		// state where the workbench shows invented numbers was also the state nobody chose.
+		// Published history no longer depends on this, so turning it off costs no real data.
+		const allowed = vscode.workspace.getConfiguration('quant').get<boolean>('daemon.allowSimulatedFeed', false);
 		if (!allowed) {
 			this._setState(ConnectionState.Disconnected);
 			this._scheduleReconnect();
