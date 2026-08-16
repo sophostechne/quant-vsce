@@ -102,14 +102,24 @@ function rebuildIndicators(): void {
 }
 
 /**
+ * A theme colour id like `charts.blue`, matched strictly.
+ *
+ * "Contains a dot" was the first attempt and was wrong in the worst way: `rgba(132, 187, 161,
+ * 0.13)` has a dot in its alpha, so every translucent colour a visualizer produced was looked up
+ * as a theme id, missed, and fell back to solid blue - painting over the chart instead of
+ * tinting behind it. A theme id is dotted identifiers and nothing else.
+ */
+const THEME_COLOR_ID = /^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/;
+
+/**
  * A theme colour id such as `charts.blue`, or any literal CSS colour.
  *
  * Built-in indicators name theme ids so they stay legible when the theme changes. A visualizer
- * is user code and may simply want `#c0ffee`, so anything without a dot is passed through as
- * written rather than looked up and lost.
+ * is user code and may simply want `#c0ffee` or an rgba tint, so anything that is not a theme id
+ * is passed through as written rather than looked up and lost.
  */
 function themeColor(styles: CSSStyleDeclaration, color: string): string {
-	if (color && !color.includes('.')) {
+	if (color && !THEME_COLOR_ID.test(color)) {
 		return color;
 	}
 	return styles.getPropertyValue(`--vscode-${color.replace('.', '-')}`).trim()
@@ -132,7 +142,7 @@ function renderLegend(atIndex?: number): void {
 			}
 		}
 		chip.textContent = text;
-		chip.style.color = series.color.includes('.')
+		chip.style.color = THEME_COLOR_ID.test(series.color)
 			? `var(--vscode-${series.color.replace('.', '-')})`
 			: series.color;
 		legendLabel.appendChild(chip);
