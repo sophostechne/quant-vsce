@@ -21,6 +21,20 @@ export interface HistoryResult {
 	readonly reason?: string;
 	/** Which venue answered, when more than one could have. */
 	readonly venue?: string;
+	/** The answering venue trades without sessions, so its latest bar is still forming. */
+	readonly continuous?: boolean;
+}
+
+/** A price for a symbol with nothing streaming it. See `lastClose`. */
+export interface LastClose {
+	readonly quote: Quote;
+	/**
+	 * True when the venue never closes, which changes what this price is rather than how fresh
+	 * it is: a still-forming daily bar's close is the current price, where a finished session's
+	 * is the last one traded before the bell.
+	 */
+	readonly continuous: boolean;
+	readonly venue?: string;
 }
 
 export const enum ConnectionState {
@@ -98,7 +112,7 @@ export class MarketDataClient implements vscode.Disposable {
 	private readonly _onDidChangeLastClose = new vscode.EventEmitter<string>();
 	readonly onDidChangeLastClose = this._onDidChangeLastClose.event;
 
-	private readonly _closes = new Map<string, { readonly quote: Quote; readonly at: number }>();
+	private readonly _closes = new Map<string, { readonly value: LastClose; readonly at: number }>();
 	/** Symbols with a close request in flight, so a repaint storm cannot multiply requests. */
 	private readonly _closeRequests = new Set<string>();
 
@@ -149,13 +163,13 @@ export class MarketDataClient implements vscode.Disposable {
 	 * Never merged into `quotes`. A close is hours or days old for an equity, and a live quote is
 	 * current; storing them together would lose the only distinction that matters here.
 	 */
-	lastClose(symbol: string): Quote | undefined {
+	lastClose(symbol: string): LastClose | undefined {
 		const key = symbol.toUpperCase();
 		const cached = this._closes.get(key);
 		if (!cached || Date.now() - cached.at > CLOSE_TTL_MS) {
 			void this._refreshClose(key);
 		}
-		return cached?.quote;
+		return cached?.value;
 	}
 
 	private async _refreshClose(symbol: string): Promise<void> {
@@ -178,12 +192,16 @@ export class MarketDataClient implements vscode.Disposable {
 			const change = previous ? last.close - previous.close : 0;
 			this._closes.set(symbol, {
 				at: Date.now(),
-				quote: {
-					symbol,
-					last: last.close,
-					change,
-					changePercent: previous && previous.close !== 0 ? (change / previous.close) * 100 : 0,
-					timestamp: last.time,
+				value: {
+					continuous: result.continuous === true,
+					venue: result.venue,
+					quote: {
+						symbol,
+						last: last.close,
+						change,
+						changePercent: previous && previous.close !== 0 ? (change / previous.close) * 100 : 0,
+						timestamp: last.time,
+					},
 				},
 			});
 			this._onDidChangeLastClose.fire(symbol);
@@ -394,7 +412,10 @@ export class MarketDataClient implements vscode.Disposable {
 			}
 			const result = await source.history(symbol, timeframe, count);
 			if (result.kind === 'bars') {
-				return { bars: result.bars, source: source.provenance, venue: source.venue };
+				return {
+					bars: result.bars, source: source.provenance,
+					venue: source.venue, continuous: source.continuous,
+				};
 			}
 			// Keep the first explanation rather than the last. The earliest source to claim the
 			// symbol is the one the user most expected to answer, so its reason is the one that

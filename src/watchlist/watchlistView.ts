@@ -87,8 +87,9 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		};
 
 		const live = this._client.quotes.get(element.symbol);
-		// A live quote wins outright; the close is only what to show in its absence.
-		const quote = live ?? this._client.lastClose(element.symbol);
+		// A live quote wins outright; the stored price is only what to show in its absence.
+		const stored = live ? undefined : this._client.lastClose(element.symbol);
+		const quote = live ?? stored?.quote;
 		if (!quote) {
 			item.description = this._client.state === ConnectionState.Connecting
 				? vscode.l10n.t('connecting…')
@@ -98,21 +99,26 @@ export class WatchlistProvider implements vscode.TreeDataProvider<SymbolNode>, v
 		}
 
 		const sign = quote.change >= 0 ? '+' : '';
-		if (!live) {
-			// Real prices, but the last one a session closed at rather than one from a moment
-			// ago. Marked on the row rather than left to look live: the whole point of showing
-			// it is that the alternative said "no data" beside a chart drawing the same symbol,
-			// and replacing one wrong impression with another would not be progress.
-			item.description = `${quote.last.toFixed(2)}  ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)  ${vscode.l10n.t('close')}`;
+		if (stored) {
+			// Real prices with nothing streaming them, and what they *are* depends on whether the
+			// venue keeps sessions. An equity's last daily bar is finished, so this is a close. A
+			// crypto daily bar is still forming, so its close is simply the current price - and
+			// calling a market that trades at three in the morning "closed" is just wrong.
+			const label = stored.continuous ? vscode.l10n.t('delayed') : vscode.l10n.t('close');
+			item.description = `${quote.last.toFixed(2)}  ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)  ${label}`;
 			item.iconPath = new vscode.ThemeIcon(
 				quote.change >= 0 ? 'arrow-up' : 'arrow-down',
 				new vscode.ThemeColor('descriptionForeground')
 			);
 			item.tooltip = new vscode.MarkdownString(
-				`**${element.symbol}**\n\n` +
-				`Close: ${quote.last.toFixed(2)}\n\n` +
-				`Change: ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)\n\n` +
-				`_Last published close. Connect a daemon for live prices._`
+				`**${element.symbol}**${stored.venue ? ` · ${stored.venue}` : ''}\n\n` +
+				(stored.continuous
+					? `Price: ${quote.last.toFixed(2)}\n\n`
+					+ `Change: ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%) on the day\n\n`
+					+ `_Refreshed periodically, not streamed. Connect a daemon for live prices._`
+					: `Close: ${quote.last.toFixed(2)}\n\n`
+					+ `Change: ${sign}${quote.change.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)\n\n`
+					+ `_Last session's close. Connect a daemon for live prices._`)
 			);
 			return item;
 		}

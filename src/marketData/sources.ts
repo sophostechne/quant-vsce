@@ -57,6 +57,16 @@ export interface HistorySource {
 	readonly venue?: string;
 
 	/**
+	 * Whether this venue trades without sessions.
+	 *
+	 * Decides what a bar's close *means*, which is not a cosmetic distinction. An equity's daily
+	 * bar is finished and will not move until the market opens again; a crypto daily bar is
+	 * still forming, so its close is the current price. Calling both "close" would be wrong
+	 * about one of them, and it is the one that trades at three in the morning.
+	 */
+	readonly continuous?: boolean;
+
+	/**
 	 * Whether this source owns the symbol.
 	 *
 	 * First match wins and order is significant, so a source that claims broadly belongs last.
@@ -185,6 +195,7 @@ export class CoinbaseSource implements HistorySource {
 	readonly name = 'coinbase';
 	readonly provenance: BarSource = 'history';
 	readonly venue = 'coinbase';
+	readonly continuous = true;
 
 	constructor(private readonly _log: Logger) { }
 
@@ -335,6 +346,7 @@ export class BinanceSource implements HistorySource {
 	readonly name = 'binance';
 	readonly provenance: BarSource = 'history';
 	readonly venue = 'binance · USDT';
+	readonly continuous = true;
 
 	constructor(private readonly _log: Logger) { }
 
@@ -426,6 +438,8 @@ export class PublishedBarsSource implements HistorySource {
 	readonly provenance: BarSource = 'history';
 	/** Named because it is one venue at a few percent of the tape, not the consolidated market. */
 	readonly venue = 'iex';
+	/** Equities keep sessions, so the last daily bar is genuinely closed. */
+	readonly continuous = false;
 
 	constructor(
 		private readonly _baseUrl: () => string,
