@@ -8,15 +8,15 @@ import { Logger } from '../logger';
 import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
 import { SimulatedFeed } from './simulator';
 import {
-	availableTimeframes, BarSource, BinanceSource, CoinbaseSource, DaemonSource, HistorySource,
+	availableTimeframes, BarProvenance, BinanceSource, CoinbaseSource, DaemonSource, HistorySource,
 	PublishedBarsSource,
 } from './sources';
 
-export type { BarSource };
+export type { BarProvenance };
 
 export interface HistoryResult {
 	readonly bars: readonly Bar[];
-	readonly source: BarSource;
+	readonly source: BarProvenance;
 	/** Why the bars are empty, when every source that claimed the symbol had none. */
 	readonly reason?: string;
 	/** Which venue answered, when more than one could have. */

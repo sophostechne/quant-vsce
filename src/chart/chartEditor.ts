@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
-import { BarSource, ConnectionState, MarketDataClient } from '../marketData/client';
+import { BarProvenance, ConnectionState, MarketDataClient } from '../marketData/client';
 import { Bar, Tick, Timeframe } from '../protocol';
 import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
@@ -101,7 +101,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 			// Provenance travels with the bars, and comes from whatever actually served them
 			// rather than from connection state: with no daemon, published history and the
 			// simulator are both reachable, and only the fetch knows which one answered.
-			let source: BarSource = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
+			let source: BarProvenance = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
 			try {
 				const result = await this._client.history(model.symbol, model.timeframe, model.bars);
 				source = result.source;
