@@ -77,7 +77,10 @@ export class VisualizerRegistry implements vscode.Disposable {
 		// replaced: two of them can then colour different stretches of the same chart.
 		const background: (string | undefined)[] = [];
 
-		for (const relative of paths) {
+		// A chart that names the same file twice gets it run once. Duplicates arrive from older
+		// versions of New Visualizer, which appended without checking, and each one would
+		// otherwise cost a worker and stack an identical line onto the legend.
+		for (const relative of [...new Set(paths)]) {
 			const uri = this._resolve(relative);
 			if (!uri) {
 				continue;

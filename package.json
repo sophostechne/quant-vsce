@@ -2,7 +2,7 @@
 	"name": "quant-workbench",
 	"displayName": "%displayName%",
 	"description": "%description%",
-	"version": "1.9.2",
+	"version": "1.9.3",
 	"publisher": "sophostechne",
 	"license": "MIT",
 	"repository": {
