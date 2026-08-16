@@ -71,6 +71,43 @@ declare global {
 	}
 
 	/**
+	 * A per-bar tint painted behind the candles.
+	 *
+	 * For things that are a state rather than a value - a regime, a session, a filter being on.
+	 * One colour per bar, aligned with `bars`; `undefined` leaves that bar alone. Use
+	 * transparency, because this sits behind the price and should stay behind it:
+	 * `rgba(132, 187, 161, 0.12)` rather than a solid green.
+	 */
+	interface VisualizerBackground {
+		readonly kind: 'background';
+		readonly colors: readonly (string | undefined)[];
+	}
+
+	/** A note pinned to one bar. */
+	interface VisualizerMarker {
+		/** Index into `bars`. */
+		readonly index: number;
+		readonly text: string;
+		readonly color?: string;
+		/** Above the bar's high. Defaults to `true`; `false` puts it below the low. */
+		readonly above?: boolean;
+	}
+
+	/**
+	 * Notes pinned to bars - a regime change, a signal, a crossing.
+	 *
+	 * At most one is drawn per bar, and only for bars on screen. Marking every bar defeats the
+	 * purpose: these exist for the few moments worth looking at.
+	 */
+	interface VisualizerMarkers {
+		readonly kind: 'markers';
+		readonly markers: readonly VisualizerMarker[];
+	}
+
+	/** Anything a visualizer can return. */
+	type VisualizerItem = VisualizerSeries | VisualizerBackground | VisualizerMarkers;
+
+	/**
 	 * What a visualizer exports.
 	 *
 	 * ```ts
@@ -83,7 +120,7 @@ declare global {
 	 * accidental infinite loop costs you a message on the chart rather than a frozen editor.
 	 */
 	type Visualizer = (bars: readonly Bar[], context: VisualizerContext)
-		=> VisualizerSeries | VisualizerSeries[] | Promise<VisualizerSeries | VisualizerSeries[]>;
+		=> VisualizerItem | VisualizerItem[] | Promise<VisualizerItem | VisualizerItem[]>;
 }
 
 export { };

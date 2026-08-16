@@ -168,12 +168,12 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		const pushVisualizers = async (bars: readonly unknown[]) => {
 			const paths = model.visualizers ?? [];
 			if (paths.length === 0 || bars.length === 0) {
-				void webviewPanel.webview.postMessage({ type: 'visualizers', series: [] });
+				void webviewPanel.webview.postMessage({ type: 'visualizers', series: [], background: [], markers: [] });
 				return;
 			}
-			const series = await this._visualizers.run(
+			const output = await this._visualizers.run(
 				paths, bars, VisualizerRegistry.context(model.symbol, model.timeframe));
-			void webviewPanel.webview.postMessage({ type: 'visualizers', series });
+			void webviewPanel.webview.postMessage({ type: 'visualizers', ...output });
 		};
 
 		// A visualizer file changed on disk. Only the drawn lines are stale, so the bars stay.
