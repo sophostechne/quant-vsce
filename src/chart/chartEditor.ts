@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { BarSource, ConnectionState, MarketDataClient } from '../marketData/client';
-import { Bar, TIMEFRAMES, Tick, Timeframe } from '../protocol';
+import { availableTimeframes, Bar, Tick, Timeframe } from '../protocol';
 import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
@@ -81,7 +81,10 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				type: 'config',
 				symbol: model.symbol,
 				timeframe: model.timeframe,
-				timeframes: TIMEFRAMES,
+				// Narrowed when no daemon is connected, so the picker offers only what something
+				// can actually serve. Re-pushed on every connection change below, so starting a
+				// daemon widens it without reopening the chart.
+				timeframes: availableTimeframes(this._client.state === ConnectionState.Connected, model.timeframe),
 				// Real path: the webview opens this socket itself and reads binary frames.
 				dataPlaneUrl: this._client.dataPlaneUrl,
 				symbolId: this._client.symbolId(model.symbol),
