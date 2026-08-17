@@ -282,6 +282,15 @@
 		"configuration": {
 			"title": "%config.title%",
 			"properties": {
+				"quant.chart.customIntervals": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "^\\d+[smhDWM]?$"
+					},
+					"default": [],
+					"markdownDescription": "%config.chart.customIntervals%"
+				},
 				"quant.daemon.host": {
 					"type": "string",
 					"default": "127.0.0.1",

@@ -19,7 +19,12 @@
  */
 
 import { Logger } from '../logger';
-import { Bar, Timeframe, TIMEFRAMES } from '../protocol';
+import {
+	Bar, BaseTimeframe, formatInterval, parseInterval, PRESET_INTERVALS, Timeframe, TIMEFRAMES,
+	Alignment, TradingSession,
+	timeframeToMillis,
+} from '../protocol';
+import { isDerivable } from './resample';
 
 /** Where a set of bars came from. Mirrors `BarProvenance` in the webview's protocol. */
 export type BarProvenance = 'live' | 'history' | 'simulated';
@@ -80,10 +85,10 @@ export interface HistorySource {
 	 * kept beside it: what is offerable is a property of whoever would have to answer, and a
 	 * hardcoded list cannot vary by symbol. Crypto carries 1m and equities do not.
 	 */
-	timeframes(): readonly Timeframe[];
+	timeframes(): readonly BaseTimeframe[];
 
 	/** Never throws. Failure is a `SourceResult`, so the next source still gets its turn. */
-	history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult>;
+	history(symbol: string, timeframe: BaseTimeframe, count: number): Promise<SourceResult>;
 }
 
 /**
@@ -101,13 +106,45 @@ export function isExchangeProduct(symbol: string): boolean {
 	return dash > 0 && QUOTES.includes(upper.slice(dash + 1));
 }
 
-/** The timeframes worth offering for a symbol: what any source claiming it can serve. */
-export function availableTimeframes(
-	sources: readonly HistorySource[],
-	symbol: string,
-	keep?: Timeframe
-): readonly Timeframe[] {
-	const offered = new Set<Timeframe>();
+/** US cash equities: 09:30 New York, which is 570 minutes past local midnight. */
+const US_EQUITY_SESSION: TradingSession = { open: 570, timeZone: 'America/New_York' };
+
+const MONDAY = 1;
+
+/**
+ * How each market this workbench reaches lines its bars up.
+ *
+ * A table rather than a pair of branches, because the two facts here are the ones that vary by
+ * exchange and there will be more markets than there are today. Adding the Gulf exchanges - which
+ * trade Sunday to Thursday - is an entry with `weekStart: 0`, not a change to the bucketing.
+ */
+const CONTINUOUS: Alignment = {
+	// No session. A venue that never closes has no open to anchor to, and aligning to one would
+	// invent a daily boundary in a market that has none.
+	weekStart: MONDAY,
+};
+
+const US_EQUITIES: Alignment = { session: US_EQUITY_SESSION, weekStart: MONDAY };
+
+/**
+ * How this symbol's bars line up with the clock and the calendar.
+ *
+ * Keyed off the same crypto/equity split that already routes requests, rather than off which
+ * source answered: alignment belongs to the instrument, and an equity is on a New York clock
+ * whether its bars arrived from the daemon or from the published service.
+ */
+export function alignmentFor(symbol: string): Alignment {
+	return isExchangeProduct(symbol) ? CONTINUOUS : US_EQUITIES;
+}
+
+/**
+ * The base granularities any source claiming this symbol can be asked for.
+ *
+ * The union across sources, not the intersection: they are tried in order and the first to answer
+ * wins, so an interval one of them can fill is worth offering even if the others cannot.
+ */
+export function availableBases(sources: readonly HistorySource[], symbol: string): readonly BaseTimeframe[] {
+	const offered = new Set<BaseTimeframe>();
 	for (const source of sources) {
 		if (source.claims(symbol)) {
 			for (const timeframe of source.timeframes()) {
@@ -115,13 +152,40 @@ export function availableTimeframes(
 			}
 		}
 	}
-	// `keep` is whatever the chart is already on. A document saved at 1m must still show its own
-	// value in the picker, or the control reads as broken rather than as narrowed - and the chart
-	// already says plainly that nothing serves that timeframe.
-	if (keep) {
-		offered.add(keep);
-	}
 	return TIMEFRAMES.filter(timeframe => offered.has(timeframe));
+}
+
+/**
+ * The intervals worth offering for a symbol.
+ *
+ * What can be *built* rather than what is published. A feed that stops at 1h still supports 2h,
+ * 3h and 4h, because those are aggregates of bars it already serves - so the picker asks whether
+ * an interval is derivable, not whether somebody serves it under that name.
+ */
+export function availableTimeframes(
+	sources: readonly HistorySource[],
+	symbol: string,
+	keep?: Timeframe,
+	custom: readonly string[] = [],
+): readonly Timeframe[] {
+	const bases = availableBases(sources, symbol);
+	const offered = [...PRESET_INTERVALS, ...custom].filter(value => isDerivable(value, bases));
+
+	// `keep` is whatever the chart is already on. A document saved at an interval nothing can
+	// fill must still show its own value in the picker, or the control reads as broken rather
+	// than as narrowed - and the chart already says plainly that no source serves it.
+	const all = keep && parseInterval(keep) ? [...offered, keep] : offered;
+
+	// Canonical spelling before de-duplicating, so a document saying `1d` and a preset saying
+	// `1D` do not become two entries for one interval.
+	const seen = new Map<string, string>();
+	for (const value of all) {
+		const interval = parseInterval(value);
+		if (interval) {
+			seen.set(formatInterval(interval), value);
+		}
+	}
+	return [...seen.keys()].sort((a, b) => timeframeToMillis(a) - timeframeToMillis(b));
 }
 
 // -- Daemon ------------------------------------------------------------------------------
@@ -139,7 +203,7 @@ export class DaemonSource implements HistorySource {
 
 	constructor(
 		private readonly _connected: () => boolean,
-		private readonly _fetch: (symbol: string, timeframe: Timeframe, count: number) => Promise<readonly Bar[]>
+		private readonly _fetch: (symbol: string, timeframe: BaseTimeframe, count: number) => Promise<readonly Bar[]>
 	) { }
 
 	/** Claims everything while connected, and so must be listed first. */
@@ -148,11 +212,11 @@ export class DaemonSource implements HistorySource {
 	}
 
 	/** Whatever its providers carry, including the sub-minute bars nothing publishes. */
-	timeframes(): readonly Timeframe[] {
+	timeframes(): readonly BaseTimeframe[] {
 		return TIMEFRAMES;
 	}
 
-	async history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult> {
+	async history(symbol: string, timeframe: BaseTimeframe, count: number): Promise<SourceResult> {
 		try {
 			const bars = await this._fetch(symbol, timeframe, count);
 			return bars.length > 0
@@ -173,7 +237,7 @@ export class DaemonSource implements HistorySource {
 const COINBASE = 'https://api.exchange.coinbase.com';
 
 /** Coinbase's granularities, in seconds. It serves no finer than a minute. */
-const GRANULARITY: Partial<Record<Timeframe, number>> = {
+const GRANULARITY: Partial<Record<BaseTimeframe, number>> = {
 	'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '1d': 86400,
 };
 
@@ -203,11 +267,11 @@ export class CoinbaseSource implements HistorySource {
 		return isExchangeProduct(symbol);
 	}
 
-	timeframes(): readonly Timeframe[] {
+	timeframes(): readonly BaseTimeframe[] {
 		return TIMEFRAMES.filter(timeframe => GRANULARITY[timeframe] !== undefined);
 	}
 
-	async history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult> {
+	async history(symbol: string, timeframe: BaseTimeframe, count: number): Promise<SourceResult> {
 		const step = GRANULARITY[timeframe];
 		if (step === undefined) {
 			return { kind: 'absent', reason: `Coinbase serves no ${timeframe} candles` };
@@ -276,7 +340,7 @@ export class CoinbaseSource implements HistorySource {
 const BINANCE = 'https://api.binance.com/api/v3/klines';
 
 /** Binance's kline intervals, matched to the set Coinbase serves. */
-const INTERVALS: Partial<Record<Timeframe, string>> = {
+const INTERVALS: Partial<Record<BaseTimeframe, string>> = {
 	'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '1d': '1d',
 };
 
@@ -360,11 +424,11 @@ export class BinanceSource implements HistorySource {
 	 * venue is reachable - so offering 1s here would put it in front of every user on the
 	 * strength of an endpoint most of them cannot reach.
 	 */
-	timeframes(): readonly Timeframe[] {
+	timeframes(): readonly BaseTimeframe[] {
 		return TIMEFRAMES.filter(timeframe => INTERVALS[timeframe] !== undefined);
 	}
 
-	async history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult> {
+	async history(symbol: string, timeframe: BaseTimeframe, count: number): Promise<SourceResult> {
 		const interval = INTERVALS[timeframe];
 		const product = toBinanceSymbol(symbol);
 		if (interval === undefined || product === undefined) {
@@ -444,7 +508,7 @@ export class PublishedBarsSource implements HistorySource {
 	constructor(
 		private readonly _baseUrl: () => string,
 		private readonly _log: Logger,
-		private readonly _timeframeLabel: (timeframe: Timeframe, symbol: string) => string,
+		private readonly _timeframeLabel: (timeframe: BaseTimeframe, symbol: string) => string,
 		private readonly _notConfigured: () => string
 	) { }
 
@@ -458,11 +522,11 @@ export class PublishedBarsSource implements HistorySource {
 	 * venue at a few percent of the consolidated tape, and a bucket that fine shows which venue
 	 * printed rather than what the instrument did.
 	 */
-	timeframes(): readonly Timeframe[] {
+	timeframes(): readonly BaseTimeframe[] {
 		return ['5m', '15m', '1h', '1d'];
 	}
 
-	async history(symbol: string, timeframe: Timeframe, count: number): Promise<SourceResult> {
+	async history(symbol: string, timeframe: BaseTimeframe, count: number): Promise<SourceResult> {
 		const base = this._baseUrl();
 		if (!base) {
 			// The packaged default is a live service, so an empty value was set by someone -

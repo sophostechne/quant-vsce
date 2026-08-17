@@ -5,13 +5,24 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
-import { Bar, ClientMessage, DaemonMessage, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
+import { Bar, ClientMessage, DaemonMessage, parseInterval, PROTOCOL_VERSION, Quote, Timeframe } from '../protocol';
 import { LastClose, LastCloseCache } from './closes';
+import { baseCountFor, baseFor, resample } from './resample';
 import { SimulatedFeed } from './simulator';
 import {
 	availableTimeframes, BarProvenance, BinanceSource, CoinbaseSource, DaemonSource, HistorySource,
-	PublishedBarsSource,
+	alignmentFor, PublishedBarsSource,
 } from './sources';
+
+/**
+ * Ceiling on base bars fetched to build one chart.
+ *
+ * A monthly chart of 240 candles is twenty years of dailies, and asking a paged feed for that is
+ * minutes of requests for a chart nobody waited for. Past this the chart comes back shorter than
+ * asked rather than slower than useful, which is the better failure - a short chart is visibly
+ * short, where a hanging one looks broken.
+ */
+const MAX_BASE_BARS = 5_000;
 
 export type { BarProvenance, LastClose };
 
@@ -123,8 +134,8 @@ export class MarketDataClient implements vscode.Disposable {
 	}
 
 	/** Timeframes worth offering for a symbol, given who could answer for it right now. */
-	timeframesFor(symbol: string, keep?: Timeframe): readonly Timeframe[] {
-		return availableTimeframes(this._sources, symbol, keep);
+	timeframesFor(symbol: string, keep?: Timeframe, custom: readonly string[] = []): readonly Timeframe[] {
+		return availableTimeframes(this._sources, symbol, keep, custom);
 	}
 
 	/**
@@ -323,6 +334,11 @@ export class MarketDataClient implements vscode.Disposable {
 	 * difference would caption real bars as simulated or, far worse, the reverse.
 	 */
 	async history(symbol: string, timeframe: Timeframe, count: number): Promise<HistoryResult> {
+		const interval = parseInterval(timeframe);
+		if (!interval) {
+			return { bars: [], source: 'history', reason: vscode.l10n.t('{0} is not an interval', timeframe) };
+		}
+
 		// Sources in order, first claim wins, and a source that cannot answer lets the next try.
 		// That fall-through is what keeps a connected daemon from ever being worse than none: the
 		// daemon claims everything while connected, so an equity against a coinbase-only provider
@@ -332,10 +348,23 @@ export class MarketDataClient implements vscode.Disposable {
 			if (!source.claims(symbol)) {
 				continue;
 			}
-			const result = await source.history(symbol, timeframe, count);
+
+			// What this source can actually be asked for. A source serving only 1h cannot answer
+			// 4h, but it can answer the 1h that 4h is built from, and asking it for 4h directly
+			// would get an honest "no such granularity" for an interval the chart can draw.
+			const base = baseFor(interval, source.timeframes());
+			if (base === undefined) {
+				reason ??= vscode.l10n.t('{0} cannot be built from what {1} serves', timeframe, source.name);
+				continue;
+			}
+			const native = base === timeframe;
+			const wanted = native ? count : Math.min(baseCountFor(interval, base, count), MAX_BASE_BARS);
+
+			const result = await source.history(symbol, base, wanted);
 			if (result.kind === 'bars') {
 				return {
-					bars: result.bars, source: source.provenance,
+					bars: native ? result.bars : resample(result.bars, interval, alignmentFor(symbol)),
+					source: source.provenance,
 					venue: source.venue, continuous: source.continuous,
 				};
 			}

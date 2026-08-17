@@ -6,11 +6,43 @@
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
 import { BarProvenance, ConnectionState, MarketDataClient } from '../marketData/client';
-import { Bar, Tick, Timeframe } from '../protocol';
+import { Bar, formatInterval, parseInterval, Tick, Timeframe } from '../protocol';
 import { VisualizerRegistry } from '../visualizers/registry';
 import { ChartDocumentModel, Drawing, parseModel, writeModel } from './chartModel';
 
 export const CHART_VIEW_TYPE = 'quant.chart';
+
+/** How many of their own intervals one person plausibly wants. Past this it is a runaway write. */
+const MAX_CUSTOM_INTERVALS = 32;
+
+/**
+ * The user's own intervals, from settings.
+ *
+ * Read on demand rather than cached, so a chart picks up an interval added from another chart -
+ * or hand-edited into settings.json - without being reopened. Re-validated on read because the
+ * setting is hand-editable and a malformed entry must not reach the picker.
+ */
+function customIntervals(): string[] {
+	const raw = vscode.workspace.getConfiguration('quant').get<string[]>('chart.customIntervals', []);
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const seen = new Set<string>();
+	for (const value of raw) {
+		const interval = typeof value === 'string' ? parseInterval(value) : undefined;
+		if (interval) {
+			seen.add(formatInterval(interval));
+		}
+	}
+	return [...seen].slice(0, MAX_CUSTOM_INTERVALS);
+}
+
+function setCustomIntervals(values: readonly string[]): Thenable<void> {
+	return vscode.workspace.getConfiguration('quant').update(
+		'chart.customIntervals',
+		values.slice(0, MAX_CUSTOM_INTERVALS),
+		vscode.ConfigurationTarget.Global);
+}
 
 /**
  * Live chart panels by document URI, so commands can reach the webview of the chart the user
@@ -112,9 +144,13 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				symbol: model.symbol,
 				timeframe: model.timeframe,
 				// Narrowed when no daemon is connected, so the picker offers only what something
-				// can actually serve. Re-pushed on every connection change below, so starting a
-				// daemon widens it without reopening the chart.
-				timeframes: this._client.timeframesFor(model.symbol, model.timeframe),
+				// can actually serve or be aggregated into. Re-pushed on every connection change
+				// below, so starting a daemon widens it without reopening the chart.
+				timeframes: this._client.timeframesFor(model.symbol, model.timeframe, customIntervals()),
+				// Sent apart from the list so the picker can group the user's own intervals and
+				// offer to remove them; merged into `timeframes` it would be indistinguishable
+				// from a preset, and removing a preset means nothing.
+				customIntervals: customIntervals(),
 				// Real path: the webview opens this socket itself and reads binary frames.
 				dataPlaneUrl: this._client.dataPlaneUrl,
 				symbolId: this._client.symbolId(model.symbol),
@@ -196,7 +232,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				.catch(() => { /* the history path reports its own failures */ });
 		}));
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; paneHeights?: number[]; drawings?: Drawing[]; index?: number }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; interval?: string; paneHeights?: number[]; drawings?: Drawing[]; index?: number }) => {
 			switch (message.type) {
 				case 'ready':
 					pushConfig();
@@ -224,6 +260,36 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 						await writeModel(document, { ...model, paneHeights: message.paneHeights });
 					}
 					break;
+
+				// Custom intervals are a setting rather than part of the document: they are a
+				// property of how someone works, not of the chart they are looking at, and one
+				// added while reading AAPL should still be there on the next chart opened.
+				case 'addCustomInterval': {
+					const interval = message.interval ? parseInterval(message.interval) : undefined;
+					if (interval) {
+						const value = formatInterval(interval);
+						const existing = customIntervals();
+						if (!existing.includes(value)) {
+							await setCustomIntervals([...existing, value]);
+						}
+						// Selected as well as added. Adding one and then having to find it in the
+						// list is a step nobody wants; TradingView switches to it too.
+						await writeModel(document, { ...model, timeframe: value });
+						// Adding the interval already selected writes nothing, so the document
+						// change that normally refreshes the picker never fires and the new entry
+						// would not appear until something else moved.
+						pushConfig();
+					}
+					break;
+				}
+
+				case 'removeCustomInterval': {
+					if (message.interval) {
+						await setCustomIntervals(customIntervals().filter(value => value !== message.interval));
+						pushConfig();
+					}
+					break;
+				}
 
 				case 'setSymbol':
 				case 'setTimeframe': {
@@ -279,6 +345,14 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		}));
 		// The id arrives after the subscribe round-trip, so the chart has to be told again.
 		disposables.push(this._client.onDidChangeSymbolMap(() => pushConfig()));
+
+		// Custom intervals are global, so one added on another chart - or typed into settings.json
+		// by hand - belongs in this picker too, without reopening it.
+		disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration('quant.chart.customIntervals')) {
+				pushConfig();
+			}
+		}));
 
 		// Development relay only. With a daemon present the webview reads ticks from its own
 		// socket and nothing here runs.
@@ -345,7 +419,10 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 <body>
 	<header class="toolbar">
 		<input id="symbol" class="symbol" spellcheck="false" autocomplete="off">
-		<select id="timeframe" class="timeframe"></select>
+		<div class="interval">
+			<button id="intervalButton" class="intervalButton" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+			<div id="intervalMenu" class="intervalMenu" role="listbox" hidden></div>
+		</div>
 		<span id="last" class="last"></span>
 		<span id="readout" class="readout"></span>
 		<span id="legend" class="legend"></span>

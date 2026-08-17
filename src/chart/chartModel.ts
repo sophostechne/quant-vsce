@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../logger';
-import { TIMEFRAMES, Timeframe } from '../protocol';
+import { formatInterval, parseInterval, Timeframe } from '../protocol';
 
 /**
  * Overlays share the candles' price scale; studies get a pane of their own, because an RSI of
@@ -82,10 +82,12 @@ export interface ChartDocumentModel {
  * draw about 21 candles - which reads as a broken chart rather than as a short one. 240 bars of
  * 5m is roughly three sessions, and the published range holds about twenty.
  *
- * It has to be a *published* timeframe. The bars provider does not resample: an unpublished one
- * 404s and comes back as no history, and the chart then fills from live trades, falling through
- * to the simulated feed on a fresh install - which is the one thing this workbench should not
- * show anyone by default. So this default and the ingest's timeframe list move together.
+ * It has to be a timeframe the ingest publishes, or one that can be aggregated from one. Broader
+ * intervals are built locally by resampling, so 15m and 1h come free from the published 5m - but
+ * nothing can be built from a granularity nobody serves, and an interval that resolves to no base
+ * comes back as no history. The chart then fills from live trades, falling through to the
+ * simulated feed on a fresh install, which is the one thing this workbench should not show anyone
+ * by default. So this default and the ingest's timeframe list still move together.
  *
  * 5m is the finest resolution these bars support honestly. They are IEX TOPS - one venue at a
  * few percent of the consolidated tape - so the finer the bucket, the more of what it shows is
@@ -249,9 +251,12 @@ export function parseModel(document: vscode.TextDocument, log: Logger): ChartDoc
 	}
 	try {
 		const parsed = JSON.parse(text) as Partial<ChartDocumentModel>;
-		const timeframe = TIMEFRAMES.includes(parsed.timeframe as Timeframe)
-			? parsed.timeframe as Timeframe
-			: DEFAULT_MODEL.timeframe;
+		// Any interval that parses, not just the ones a feed publishes: a document may name 4h,
+		// which no source serves and the chart builds from 1h. Whether it can be filled is a
+		// question for the sources at load time, and it is answered on the chart rather than by
+		// silently rewriting the user's file to something else.
+		const declared = typeof parsed.timeframe === 'string' ? parseInterval(parsed.timeframe) : undefined;
+		const timeframe = declared ? formatInterval(declared) : DEFAULT_MODEL.timeframe;
 		return {
 			style: CHART_STYLES.includes(parsed.style as ChartStyle) ? parsed.style as ChartStyle : DEFAULT_MODEL.style,
 			scale: parsed.scale === 'log' ? 'log' : 'linear',
