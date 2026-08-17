@@ -8,6 +8,7 @@ import {
 	TICK_RECORD_BYTES
 } from './protocol';
 import { IndicatorSeries, computeIndicator } from './indicators';
+import { Interval, UNIT_GROUPS, describeInterval, formatInterval, parseInterval } from './intervals';
 import { ChartStyle, StyleOptions, TRANSFORM_STYLES, drawPriceSeries, transformBars } from './chartTypes';
 import { Drawing, Projection, drawDrawings, handleAt, hitTest } from './drawings';
 import { specFor } from './drawingTools';
@@ -17,7 +18,8 @@ declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 
 const symbolInput = document.getElementById('symbol') as HTMLInputElement;
-const timeframeSelect = document.getElementById('timeframe') as HTMLSelectElement;
+const intervalButton = document.getElementById('intervalButton') as HTMLButtonElement;
+const intervalMenu = document.getElementById('intervalMenu') as HTMLElement;
 const lastLabel = document.getElementById('last') as HTMLElement;
 const statusLabel = document.getElementById('status') as HTMLElement;
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -1203,13 +1205,14 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
 				rebuildSeries();
 			}
 
-			timeframeSelect.replaceChildren();
-			for (const timeframe of message.timeframes) {
-				const option = document.createElement('option');
-				option.value = timeframe;
-				option.textContent = timeframe;
-				option.selected = timeframe === message.timeframe;
-				timeframeSelect.appendChild(option);
+			offeredIntervals = message.timeframes;
+			customIntervals = message.customIntervals ?? [];
+			currentInterval = message.timeframe;
+			renderIntervalButton();
+			if (!intervalMenu.hidden) {
+				// Open while the host answered - a symbol change narrows the list underneath the
+				// cursor, and leaving the old rows up would offer intervals that just went away.
+				renderIntervalMenu();
 			}
 
 			if (message.dataPlaneUrl) {
@@ -1306,9 +1309,205 @@ symbolInput.addEventListener('change', () => {
 	}
 });
 
-timeframeSelect.addEventListener('change', () => {
-	vscode.postMessage({ type: 'setTimeframe', timeframe: timeframeSelect.value });
+// -- Interval picker -------------------------------------------------------------------
+// A menu rather than a <select>, because the list is grouped by unit, marks which entries are
+// the user's own, and carries a form for adding one - none of which an <option> can hold.
+
+let offeredIntervals: readonly string[] = [];
+let customIntervals: readonly string[] = [];
+let currentInterval = '';
+
+function renderIntervalButton(): void {
+	const parsed = parseInterval(currentInterval);
+	intervalButton.textContent = parsed ? formatInterval(parsed) : currentInterval;
+	intervalButton.title = parsed
+		? describeInterval(parsed)
+		// Kept selectable and labelled rather than blanked: the document says this, and a picker
+		// showing nothing would look broken where the chart already explains the problem.
+		: `${currentInterval} — no source can fill this`;
+}
+
+function chooseInterval(value: string): void {
+	closeIntervalMenu();
+	if (value !== currentInterval) {
+		vscode.postMessage({ type: 'setTimeframe', timeframe: value });
+	}
+}
+
+function renderIntervalMenu(): void {
+	intervalMenu.replaceChildren();
+
+	const custom = new Set(customIntervals);
+	const parsed = offeredIntervals
+		.map(value => ({ value, interval: parseInterval(value) }))
+		.filter((entry): entry is { value: string; interval: Interval } => entry.interval !== undefined);
+
+	for (const group of UNIT_GROUPS) {
+		const rows = parsed.filter(entry => entry.interval.unit === group.unit);
+		if (rows.length === 0) {
+			// Whole groups are absent rather than empty: a feed with no sub-minute data should
+			// not show a Seconds heading with nothing under it.
+			continue;
+		}
+
+		const heading = document.createElement('div');
+		heading.className = 'intervalGroup';
+		heading.textContent = group.title;
+		intervalMenu.appendChild(heading);
+
+		for (const { value, interval } of rows) {
+			intervalMenu.appendChild(intervalRow(value, interval, custom.has(value)));
+		}
+	}
+
+	intervalMenu.appendChild(customIntervalForm());
+}
+
+function intervalRow(value: string, interval: Interval, isCustom: boolean): HTMLElement {
+	const row = document.createElement('div');
+	row.className = 'intervalRow';
+
+	const option = document.createElement('button');
+	option.type = 'button';
+	option.className = 'intervalOption';
+	option.setAttribute('role', 'option');
+	option.setAttribute('aria-selected', String(value === currentInterval));
+	if (value === currentInterval) {
+		option.classList.add('selected');
+	}
+
+	const name = document.createElement('span');
+	name.className = 'intervalName';
+	name.textContent = value;
+
+	// The long form is what separates `1m` from `1M` at a glance, which is the one mistake this
+	// vocabulary invites.
+	const detail = document.createElement('span');
+	detail.className = 'intervalDetail';
+	detail.textContent = describeInterval(interval);
+
+	option.append(name, detail);
+	option.addEventListener('click', () => chooseInterval(value));
+	row.appendChild(option);
+
+	if (isCustom) {
+		const remove = document.createElement('button');
+		remove.type = 'button';
+		remove.className = 'intervalRemove';
+		remove.title = `Remove ${value}`;
+		remove.setAttribute('aria-label', `Remove ${value}`);
+		remove.textContent = '×';
+		remove.addEventListener('click', event => {
+			// Without this the click reaches the row behind it and selects the interval being
+			// removed, which then cannot be removed because it is the one in use.
+			event.stopPropagation();
+			vscode.postMessage({ type: 'removeCustomInterval', interval: value });
+		});
+		row.appendChild(remove);
+	}
+
+	return row;
+}
+
+function customIntervalForm(): HTMLElement {
+	const form = document.createElement('form');
+	form.className = 'intervalCustom';
+
+	const label = document.createElement('label');
+	label.className = 'intervalGroup';
+	label.textContent = 'Add custom interval';
+	label.htmlFor = 'intervalCount';
+
+	const count = document.createElement('input');
+	count.id = 'intervalCount';
+	count.className = 'intervalCount';
+	count.type = 'number';
+	count.min = '1';
+	count.step = '1';
+	count.placeholder = '90';
+
+	const unit = document.createElement('select');
+	unit.className = 'intervalUnit';
+	for (const group of UNIT_GROUPS) {
+		const option = document.createElement('option');
+		option.value = group.unit;
+		option.textContent = group.title;
+		unit.appendChild(option);
+	}
+	unit.value = 'm';
+
+	const add = document.createElement('button');
+	add.type = 'submit';
+	add.className = 'intervalAdd';
+	add.textContent = 'Add';
+
+	const error = document.createElement('div');
+	error.className = 'intervalError';
+	error.hidden = true;
+
+	form.addEventListener('submit', event => {
+		event.preventDefault();
+		const value = `${count.value.trim()}${unit.value}`;
+		const interval = parseInterval(value);
+		if (!interval) {
+			error.textContent = count.value.trim()
+				? `${value} is not an interval this chart can use.`
+				: 'Enter how many.';
+			error.hidden = false;
+			count.focus();
+			return;
+		}
+		closeIntervalMenu();
+		vscode.postMessage({ type: 'addCustomInterval', interval: formatInterval(interval) });
+	});
+
+	const row = document.createElement('div');
+	row.className = 'intervalCustomRow';
+	row.append(count, unit, add);
+	form.append(label, row, error);
+	return form;
+}
+
+function openIntervalMenu(): void {
+	renderIntervalMenu();
+	intervalMenu.hidden = false;
+	intervalButton.setAttribute('aria-expanded', 'true');
+
+	// Placed after unhiding, because a hidden element measures zero and the menu would be pinned
+	// to the top left. Flipped above the button when there is no room below, and pulled back from
+	// the right edge, so a chart in a narrow panel does not put half the menu off screen.
+	const anchor = intervalButton.getBoundingClientRect();
+	const menu = intervalMenu.getBoundingClientRect();
+	const below = window.innerHeight - anchor.bottom;
+	intervalMenu.style.top = below < menu.height && anchor.top > below
+		? `${Math.max(4, anchor.top - menu.height - 2)}px`
+		: `${anchor.bottom + 2}px`;
+	intervalMenu.style.left = `${Math.max(4, Math.min(anchor.left, window.innerWidth - menu.width - 4))}px`;
+
+	intervalMenu.querySelector<HTMLElement>('.intervalOption.selected')?.focus();
+}
+
+function closeIntervalMenu(): void {
+	intervalMenu.hidden = true;
+	intervalButton.setAttribute('aria-expanded', 'false');
+}
+
+intervalButton.addEventListener('click', () => {
+	if (intervalMenu.hidden) {
+		openIntervalMenu();
+	} else {
+		closeIntervalMenu();
+	}
 });
+
+// Anywhere outside dismisses, which is what a menu is expected to do. Capture, so it still fires
+// when the click lands on the canvas and is stopped there.
+document.addEventListener('pointerdown', event => {
+	const target = event.target as Node | null;
+	if (!intervalMenu.hidden && target && !intervalMenu.contains(target) && !intervalButton.contains(target)) {
+		closeIntervalMenu();
+	}
+}, true);
 
 // -- Interaction -----------------------------------------------------------------------
 
@@ -1546,6 +1745,13 @@ canvas.addEventListener('dblclick', () => {
 
 window.addEventListener('keydown', event => {
 	if (event.key === 'Escape') {
+		// Before the tools: the menu is the thing most recently opened, so it is what Escape
+		// should dismiss, and cancelling a drawing out from under an open menu is a surprise.
+		if (!intervalMenu.hidden) {
+			closeIntervalMenu();
+			intervalButton.focus();
+			return;
+		}
 		if (armedTool || pendingDrawing) {
 			armedTool = undefined;
 			pendingDrawing = undefined;

@@ -81,6 +81,8 @@ export interface ConfigMessage {
 	symbol: string;
 	timeframe: string;
 	timeframes: readonly string[];
+	/** The subset of `timeframes` the user added themselves, which are the removable ones. */
+	customIntervals?: readonly string[];
 	dataPlaneUrl?: string;
 	symbolId?: number;
 	style?: string;

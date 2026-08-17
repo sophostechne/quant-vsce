@@ -8,6 +8,7 @@
 	"viewsWelcome.watchlist": "No symbols yet.\n[Add Symbol](command:quant.addSymbol)",
 	"customEditor.chart.displayName": "Chart",
 	"config.title": "Quant",
+	"config.chart.customIntervals": "Your own chart intervals, added alongside the presets. Written as a count and a unit: `s` seconds, `m` minutes, `h` hours, `D` days, `W` weeks, `M` months — so `90m` is ninety minutes and `3M` is three months. Case matters: `1m` is a minute and `1M` is a month. An interval only appears in the picker when it can be built from a granularity a source serves.",
 	"config.daemon.host": "Host of the local market data daemon.",
 	"config.daemon.port": "Port of the local market data daemon.",
 	"config.daemon.autoConnect": "Connect to the market data daemon on startup.",
