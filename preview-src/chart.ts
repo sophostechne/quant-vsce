@@ -497,13 +497,78 @@ function updateReadout(bar: Bar | undefined, absoluteIndex?: number): void {
 	}
 }
 
-/** Compact enough for an axis chip: time of day, with a date when the span crosses days. */
-function formatTime(ms: number): string {
+const DAY_MS = 86_400_000;
+/** A month is not a fixed length; this is short enough that any real month clears it. */
+const MONTH_MS = 27 * DAY_MS;
+
+/**
+ * How long one bar covers, read off the bars themselves.
+ *
+ * The smallest gap on screen rather than the average, because sessions close: a daily series
+ * carries three-day gaps over every weekend and a longer one over every holiday, so a mean would
+ * report an interval no bar actually has. The smallest gap is the interval, whatever the calendar
+ * did around it. Zero when there is nothing to measure - a single visible bar.
+ */
+function barSpacing(visible: readonly Bar[]): number {
+	let smallest = Infinity;
+	for (let i = 1; i < visible.length; i++) {
+		const gap = visible[i]!.time - visible[i - 1]!.time;
+		if (gap > 0 && gap < smallest) {
+			smallest = gap;
+		}
+	}
+	return Number.isFinite(smallest) ? smallest : 0;
+}
+
+/**
+ * The axis label format for what is currently on screen.
+ *
+ * Derived from the interval the bars are on and the span they cover, not from how many of them
+ * there are. Bar count was the first attempt and is only a proxy for the span at one interval:
+ * a daily chart is almost never 300 bars wide, so every label on it printed the time - and every
+ * daily bar opens at the same time, which is a whole axis reading `00:00`. What a label needs to
+ * say is whatever distinguishes one tick from the next, and that is set by the interval.
+ */
+function axisTimeFormat(visible: readonly Bar[]): (ms: number) => string {
+	const spacing = barSpacing(visible);
+	const first = visible[0]?.time ?? 0;
+	const last = visible[visible.length - 1]?.time ?? 0;
+	// Years are only worth the width when the window actually crosses one.
+	const years = new Date(first).getFullYear() !== new Date(last).getFullYear();
+
+	if (spacing >= MONTH_MS) {
+		return ms => new Date(ms).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+	}
+	if (spacing >= DAY_MS) {
+		return ms => new Date(ms).toLocaleDateString(undefined, years
+			? { year: 'numeric', month: 'short', day: 'numeric' }
+			: { month: 'short', day: 'numeric' });
+	}
+	const time = (ms: number) =>
+		new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+	if (last - first > DAY_MS) {
+		return ms => `${new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time(ms)}`;
+	}
+	return time;
+}
+
+/**
+ * The crosshair's own label, which names a single bar rather than spacing out an axis.
+ *
+ * More detail than the axis carries: the axis omits whatever repeats across its ticks, but the
+ * chip is answering "which bar is this", and a date with no year is only an answer if you already
+ * know where you are in the series.
+ */
+function formatCrosshairTime(visible: readonly Bar[], ms: number): string {
+	const spacing = barSpacing(visible);
 	const date = new Date(ms);
-	const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-	return viewSize > 300
-		? `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}`
-		: time;
+	if (spacing >= MONTH_MS) {
+		return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+	}
+	const day = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+	return spacing >= DAY_MS
+		? day
+		: `${day} ${date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function applyPrice(price: number): void {
@@ -1080,13 +1145,21 @@ function drawTimeAxis(
 	visible: readonly Bar[], slot: number, plotWidth: number, height: number,
 	gridColor: string, textColor: string,
 ): void {
-	const labelWidth = 62;
-	const step = Math.max(1, Math.ceil(labelWidth / slot));
 	const baseline = height - PAD_BOTTOM;
 
 	context.font = '10px var(--vscode-font-family)';
 	context.textBaseline = 'top';
 	context.textAlign = 'center';
+
+	// Measured rather than assumed: the format now varies with the interval, and the fixed 62px
+	// that fit `09:30` would let `Jan 5, 2024` run into its neighbour. Measuring the widest of the
+	// two ends covers the year rolling over inside the window, which is where the format grows.
+	const format = axisTimeFormat(visible);
+	const labelWidth = Math.max(
+		context.measureText(format(visible[0]!.time)).width,
+		context.measureText(format(visible[visible.length - 1]!.time)).width,
+	) + 14;
+	const step = Math.max(1, Math.ceil(labelWidth / slot));
 
 	for (let i = 0; i < visible.length; i += step) {
 		const x = i * slot + slot / 2;
@@ -1102,7 +1175,7 @@ function drawTimeAxis(
 		context.globalAlpha = 1;
 
 		context.fillStyle = textColor;
-		context.fillText(formatTime(visible[i]!.time), x, baseline + 5);
+		context.fillText(format(visible[i]!.time), x, baseline + 5);
 	}
 	context.textAlign = 'left';
 }
@@ -1159,7 +1232,7 @@ function drawCrosshair(
 	context.fillStyle = textColor;
 	context.fillText(valueText, plotWidth + 6, y);
 
-	const timeText = formatTime(bar.time);
+	const timeText = formatCrosshairTime(visible, bar.time);
 	context.textAlign = 'center';
 	const chipWidth = context.measureText(timeText).width + 10;
 	const chipX = Math.max(0, Math.min(snapX - chipWidth / 2, plotWidth - chipWidth));
