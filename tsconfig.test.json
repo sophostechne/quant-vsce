@@ -7,6 +7,17 @@
 		"rootDir": "./src",
 		"outDir": "./out",
 		"sourceMap": true,
+		// CommonJS, unlike the bundle. The runner loads these files directly and the package has
+		// no `"type": "module"`, so `module: preserve` emitted extensionless ESM imports that Node
+		// refused to resolve - the suite compiled and then died on its first import. `require`
+		// resolves them the way the bundler does, which is what the source is written for.
+		"module": "commonjs",
+		// node10 is the resolution that matches `require`, and it is the only one that keeps the
+		// extensionless imports the source is written with. Deprecated in 6.0 and removed in 7.0,
+		// where this becomes `node16` and every test import grows a `.js` - a mechanical change,
+		// but one to make deliberately rather than discover when the compiler drops it.
+		"moduleResolution": "node10",
+		"ignoreDeprecations": "6.0",
 		"types": [
 			"node",
 			"vscode",
@@ -15,5 +26,9 @@
 	},
 	"include": [
 		"src/**/*"
-	]
+	],
+	// The base config excludes `src/test` so the bundle never pulls a test in. Overriding
+	// `include` alone does not undo that - `exclude` is inherited and is applied after - so
+	// without this the suite compiles no tests and reports a cheerful zero passing.
+	"exclude": []
 }
