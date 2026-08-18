@@ -266,27 +266,27 @@
 				{
 					"command": "quant.setChartStyle",
 					"when": "activeCustomEditorId == quant.chart",
-					"group": "navigation@0"
-				},
-				{
-					"command": "quant.setChartScale",
-					"when": "activeCustomEditorId == quant.chart",
 					"group": "navigation@1"
 				},
 				{
-					"command": "quant.draw",
+					"command": "quant.setChartScale",
 					"when": "activeCustomEditorId == quant.chart",
 					"group": "navigation@2"
 				},
 				{
 					"command": "quant.addIndicator",
 					"when": "activeCustomEditorId == quant.chart",
-					"group": "navigation@1"
+					"group": "navigation@3"
 				},
 				{
 					"command": "quant.removeIndicator",
 					"when": "activeCustomEditorId == quant.chart",
-					"group": "navigation@2"
+					"group": "navigation@4"
+				},
+				{
+					"command": "quant.draw",
+					"when": "activeCustomEditorId == quant.chart",
+					"group": "navigation@5"
 				},
 				{
 					"command": "quant.clearDrawings",
