@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.2
+
+- Hollow candles no longer have a line down the middle of them. The wick was drawn as one stroke
+  from high to low and the body drawn over it, which works for every filled style because the
+  body hides the middle of the line - but a hollow body is an outline, so the wick ran straight
+  through the inside of it. It is now drawn as two segments, above the body and below it.
+- The chart's title buttons keep their pairs together. Two of them shared an order number with
+  two others, and a tie there is broken by comparing titles, so Add Indicator sorted in between
+  Chart Style and Price Scale and Draw did the same to Remove Indicator - separating the two
+  settings that describe how the chart is drawn with a command that adds a series to it.
+
 ## 1.10.1
 
 - The time axis follows the interval. Its labels were chosen by how many bars were on screen,

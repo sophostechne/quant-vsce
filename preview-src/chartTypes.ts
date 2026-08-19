@@ -254,13 +254,15 @@ function drawCandles(draw: DrawContext, variant: 'filled' | 'hollow' | 'volume')
 
 		context.strokeStyle = color;
 		context.fillStyle = color;
+		context.lineWidth = 1;
+		const wickX = Math.round(x) + 0.5;
 
-		context.beginPath();
-		context.moveTo(Math.round(x) + 0.5, toY(bar.high));
-		context.lineTo(Math.round(x) + 0.5, toY(bar.low));
-		context.stroke();
-
+		// No body to hide behind at this density, so the wick is the whole bar.
 		if (dense) {
+			context.beginPath();
+			context.moveTo(wickX, toY(bar.high));
+			context.lineTo(wickX, toY(bar.low));
+			context.stroke();
 			continue;
 		}
 
@@ -274,9 +276,20 @@ function drawCandles(draw: DrawContext, variant: 'filled' | 'hollow' | 'volume')
 		const closeY = toY(bar.close);
 		const top = Math.min(openY, closeY);
 		const height = Math.max(1, Math.abs(closeY - openY));
+		const bottom = top + height;
+
+		// Two segments, above the body and below it, rather than one line the body is drawn over.
+		// A filled body hides the middle of a full-length wick, which is why this looked right
+		// everywhere else; a hollow body is an outline, so the line ran straight through it and
+		// the candle read as having a stalk down its centre.
+		context.beginPath();
+		context.moveTo(wickX, toY(bar.high));
+		context.lineTo(wickX, top);
+		context.moveTo(wickX, bottom);
+		context.lineTo(wickX, toY(bar.low));
+		context.stroke();
 
 		if (variant === 'hollow' && bar.close >= bar.open) {
-			context.lineWidth = 1;
 			context.strokeRect(x - bodyWidth / 2 + 0.5, top + 0.5, bodyWidth - 1, height - 1);
 		} else {
 			context.fillRect(x - bodyWidth / 2, top, bodyWidth, height);
