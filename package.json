@@ -140,6 +140,27 @@
 				"icon": "$(play)"
 			},
 			{
+				"command": "quant.runForecast",
+				"title": "%cmd.runForecast%",
+				"category": "%cmd.category%",
+				"icon": "$(telescope)"
+			},
+			{
+				"command": "quant.resolveForecasts",
+				"title": "%cmd.resolveForecasts%",
+				"category": "%cmd.category%"
+			},
+			{
+				"command": "quant.showForecastReport",
+				"title": "%cmd.showForecastReport%",
+				"category": "%cmd.category%"
+			},
+			{
+				"command": "quant.auditForecasts",
+				"title": "%cmd.auditForecasts%",
+				"category": "%cmd.category%"
+			},
+			{
 				"command": "quant.addIndicator",
 				"title": "%cmd.addIndicator%",
 				"category": "%cmd.category%",
@@ -353,6 +374,49 @@
 					"type": "object",
 					"default": {},
 					"description": "%config.backtest.params%"
+				},
+				"quant.forecast.product": {
+					"type": "string",
+					"default": "BTC-USD",
+					"description": "%config.forecast.product%"
+				},
+				"quant.forecast.timeframe": {
+					"type": "string",
+					"default": "1d",
+					"enum": ["1m", "5m", "15m", "1h", "6h", "1d"],
+					"description": "%config.forecast.timeframe%"
+				},
+				"quant.forecast.bars": {
+					"type": "number",
+					"default": 1000,
+					"minimum": 300,
+					"maximum": 10000,
+					"description": "%config.forecast.bars%"
+				},
+				"quant.forecast.resolveBars": {
+					"type": "number",
+					"default": 5000,
+					"minimum": 100,
+					"maximum": 50000,
+					"description": "%config.forecast.resolveBars%"
+				},
+				"quant.forecast.horizon": {
+					"type": "number",
+					"default": 20,
+					"minimum": 1,
+					"maximum": 500,
+					"description": "%config.forecast.horizon%"
+				},
+				"quant.forecast.model": {
+					"type": "string",
+					"default": "patterns",
+					"enum": ["baseline", "cycles", "patterns", "flows"],
+					"description": "%config.forecast.model%"
+				},
+				"quant.forecast.context": {
+					"type": "string",
+					"default": "",
+					"description": "%config.forecast.context%"
 				},
 				"quant.engine.projectPath": {
 					"type": "string",

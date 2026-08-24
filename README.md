@@ -30,6 +30,17 @@ there. With the checkout open as your folder, neither setting is needed.
 Without this, the designer opens and charts work, but evaluating, searching and walking a
 strategy forward all report that no interpreter is configured.
 
+The same engine connection powers the forecast workflow. The command palette contains:
+
+- **Quant: Run Market Forecast** — generates and permanently records a configured forecast.
+- **Quant: Resolve Forecast Outcomes** — appends outcomes whose confirmation windows matured.
+- **Quant: Show Forecast Performance Report** — reports calibration by immutable model version.
+- **Quant: Audit Forecast Registry** — checks identities, chronology and outcome links.
+
+Configure `quant.forecast.product`, `timeframe`, `bars`, `horizon` and `model`. Cross-market
+`flows` mode additionally requires comma-separated `quant.forecast.context` symbols. Forecasts,
+reports and deterministic signal explanations appear in the Quant output channel.
+
 ### Historical charts, with nothing installed
 
 Charts draw real historical prices out of the box, with no daemon and no credentials — bars come

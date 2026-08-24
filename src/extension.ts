@@ -15,7 +15,7 @@ import { BacktestRunner, formatResult } from './strategies/backtestRunner';
 import { StrategiesProvider, StrategyNode } from './strategies/strategiesView';
 import { STRATEGY_VIEW_TYPE, StrategyEditorProvider } from './strategy/strategyEditor';
 import { defaultStrategyContent } from './strategy/strategyModel';
-import { StrategyRunner } from './strategy/strategyRunner';
+import { ForecastAudit, ForecastPayload, ForecastReport, StrategyRunner } from './strategy/strategyRunner';
 import { SymbolNode, WatchlistProvider } from './watchlist/watchlistView';
 import { VisualizerRegistry } from './visualizers/registry';
 import { newVisualizer } from './visualizers/scaffold';
@@ -51,7 +51,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		// rather than picking one.
 		return newVisualizer(context.extensionUri, activeChartDocument(), log);
 	}));
-	context.subscriptions.push(StrategyEditorProvider.register(context, new StrategyRunner(log), log));
+	const engineRunner = new StrategyRunner(log);
+	context.subscriptions.push(StrategyEditorProvider.register(context, engineRunner, log));
 	context.subscriptions.push(registerIndicatorCommands(log));
 	context.subscriptions.push(createStatusBarItem(client));
 
@@ -60,6 +61,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('quant.disconnect', () => client.disconnect()),
 		vscode.commands.registerCommand('quant.showLog', () => log.show()),
 		vscode.commands.registerCommand('quant.newStrategy', () => openNewStrategy()),
+		vscode.commands.registerCommand('quant.runForecast', () => runForecast(engineRunner, log)),
+		vscode.commands.registerCommand('quant.resolveForecasts', () => resolveForecasts(engineRunner, log)),
+		vscode.commands.registerCommand('quant.showForecastReport', () => showForecastReport(engineRunner, log)),
+		vscode.commands.registerCommand('quant.auditForecasts', () => auditForecasts(engineRunner, log)),
 
 		vscode.commands.registerCommand('quant.addSymbol', async () => {
 			const symbol = await vscode.window.showInputBox({
@@ -102,6 +107,113 @@ export function activate(context: vscode.ExtensionContext): void {
 	if (vscode.workspace.getConfiguration('quant').get<boolean>('daemon.autoConnect', true)) {
 		client.connect();
 	}
+}
+
+async function runForecast(runner: StrategyRunner, log: Logger): Promise<void> {
+	try {
+		const forecast = await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: vscode.l10n.t('Generating market forecast…'), cancellable: true,
+		}, (_progress, token) => runner.forecast(token));
+		log.info('\n' + formatForecast(forecast));
+		log.show();
+		void vscode.window.showInformationMessage(vscode.l10n.t(
+			'{0}: {1}% turning-point probability over {2} bars.', forecast.market,
+			(forecast.turn_probability * 100).toFixed(1), String(forecast.horizon_bars)));
+	} catch (error) {
+		reportForecastError(log, vscode.l10n.t('Forecast failed'), error);
+	}
+}
+
+async function resolveForecasts(runner: StrategyRunner, log: Logger): Promise<void> {
+	try {
+		const result = await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: vscode.l10n.t('Resolving forecast outcomes…'), cancellable: true,
+		}, (_progress, token) => runner.resolveForecasts(token));
+		log.info(`Forecast outcomes: ${result.resolved} resolved, ${result.pending} pending.`);
+		void vscode.window.showInformationMessage(vscode.l10n.t(
+			'{0} forecast outcomes resolved; {1} still pending.',
+			String(result.resolved), String(result.pending)));
+	} catch (error) {
+		reportForecastError(log, vscode.l10n.t('Forecast resolution failed'), error);
+	}
+}
+
+async function showForecastReport(runner: StrategyRunner, log: Logger): Promise<void> {
+	try {
+		const report = await runner.forecastReport();
+		log.info('\n' + formatForecastReport(report));
+		log.show();
+	} catch (error) {
+		reportForecastError(log, vscode.l10n.t('Forecast report failed'), error);
+	}
+}
+
+async function auditForecasts(runner: StrategyRunner, log: Logger): Promise<void> {
+	try {
+		const audit = await runner.auditForecasts();
+		log.info('\n' + formatForecastAudit(audit));
+		log.show();
+		if (!audit.ok) {
+			void vscode.window.showWarningMessage(vscode.l10n.t(
+				'Forecast registry audit found {0} errors.', String(audit.errors.length)));
+		}
+	} catch (error) {
+		reportForecastError(log, vscode.l10n.t('Forecast audit failed'), error);
+	}
+}
+
+function formatForecast(forecast: ForecastPayload): string {
+	const lines = [
+		`${forecast.market} · ${forecast.model_version} · ${forecast.timeframe}`,
+		`Turn ${(forecast.turn_probability * 100).toFixed(1)}% · volatility ${(forecast.volatility_probability * 100).toFixed(1)}%`,
+		`Direction: up ${(forecast.direction_probability.up * 100).toFixed(1)}% · flat ${(forecast.direction_probability.flat * 100).toFixed(1)}% · down ${(forecast.direction_probability.down * 100).toFixed(1)}%`,
+		`Reversals: bullish ${formatLevel(forecast.bullish_reversal)} · bearish ${formatLevel(forecast.bearish_reversal)}`,
+		...forecast.explanation.map(statement => `  ${statement}`),
+		`Registry: ${forecast.recorded ? forecast.registry : 'not recorded'}`,
+	];
+	return lines.join('\n');
+}
+
+function formatForecastReport(report: ForecastReport): string {
+	const lines = ['Forecast performance by immutable model version'];
+	for (const [version, model] of Object.entries(report.models)) {
+		lines.push(
+			`${version} (${model.forecasts} resolved)`,
+			`  Brier: turn ${model.turn_brier.toFixed(4)} · direction ${model.direction_brier.toFixed(4)} · volatility ${model.volatility_brier.toFixed(4)}`,
+			`  Direction log loss ${model.direction_log_loss.toFixed(4)} · mean return ${(model.mean_realised_return * 100).toFixed(2)}%`,
+			`  Turn precision ${(model.turn_precision * 100).toFixed(1)}% · recall ${(model.turn_recall * 100).toFixed(1)}%`,
+			`  Directional return ${(model.directional_net_return * 100).toFixed(2)}% · max drawdown ${(model.directional_max_drawdown * 100).toFixed(2)}%`,
+		);
+	}
+	if (Object.keys(report.models).length === 0) {
+		lines.push('No resolved forecasts yet.');
+	}
+	lines.push(formatForecastAudit(report.audit));
+	return lines.join('\n');
+}
+
+function formatForecastAudit(audit: ForecastAudit): string {
+	return [
+		`Registry audit: ${audit.ok ? 'clean' : 'failed'}`,
+		`  ${audit.forecasts} forecasts · ${audit.outcomes} outcomes · ${audit.unresolved} unresolved`,
+		...audit.errors.map(error => `  ERROR: ${error}`),
+	].join('\n');
+}
+
+function formatLevel(value: number | null): string {
+	return value === null ? 'n/a' : value.toFixed(4);
+}
+
+function reportForecastError(log: Logger, title: string, error: unknown): void {
+	if (error instanceof vscode.CancellationError) {
+		log.info(`${title}: cancelled.`);
+		return;
+	}
+	const message = error instanceof Error ? error.message : String(error);
+	log.error(`${title}: ${message}`);
+	void vscode.window.showErrorMessage(`${title}: ${message}`);
 }
 
 export function deactivate(): void {

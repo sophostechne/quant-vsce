@@ -63,6 +63,56 @@ interface Response {
 	readonly error?: string;
 }
 
+export type ForecastModel = 'baseline' | 'cycles' | 'patterns' | 'flows';
+
+export interface ForecastPayload extends Response {
+	readonly forecast_id: string;
+	readonly market: string;
+	readonly timeframe: string;
+	readonly horizon_bars: number;
+	readonly model_version: string;
+	readonly turn_probability: number;
+	readonly direction_probability: { readonly up: number; readonly flat: number; readonly down: number };
+	readonly volatility_probability: number;
+	readonly bullish_reversal: number | null;
+	readonly bearish_reversal: number | null;
+	readonly confidence: string;
+	readonly explanation: readonly string[];
+	readonly registry: string | null;
+	readonly recorded: boolean;
+	readonly timing_array?: readonly number[];
+	readonly pattern?: { readonly neighbor_count: number; readonly outcome_dispersion: number };
+	readonly flows?: { readonly active_markets: readonly string[]; readonly disabled_factors: readonly string[] };
+}
+
+export interface ForecastResolution extends Response {
+	readonly resolved: number;
+	readonly pending: number;
+}
+
+export interface ForecastAudit extends Response {
+	readonly forecasts: number;
+	readonly outcomes: number;
+	readonly unresolved: number;
+	readonly errors: readonly string[];
+}
+
+export interface ForecastReport extends Response {
+	readonly models: Readonly<Record<string, {
+		readonly forecasts: number;
+		readonly turn_brier: number;
+		readonly volatility_brier: number;
+		readonly direction_brier: number;
+		readonly direction_log_loss: number;
+		readonly mean_realised_return: number;
+		readonly turn_precision: number;
+		readonly turn_recall: number;
+		readonly directional_net_return: number;
+		readonly directional_max_drawdown: number;
+	}>>;
+	readonly audit: ForecastAudit;
+}
+
 /** Progress from a search, one per generation. */
 export interface Generation {
 	readonly type: 'generation';
@@ -165,6 +215,70 @@ export interface EvolveOptions {
 export class StrategyRunner {
 
 	constructor(private readonly _log: Logger) { }
+
+	/** Generates and records a point-in-time forecast through the engine's stable JSON contract. */
+	async forecast(token?: vscode.CancellationToken): Promise<ForecastPayload> {
+		const { python, projectRoot } = this._resolvePaths();
+		const config = vscode.workspace.getConfiguration('quant');
+		const model = config.get<ForecastModel>('forecast.model', 'patterns');
+		const args = [
+			'-m', 'quant.cli', 'forecast',
+			'--product', config.get<string>('forecast.product', 'BTC-USD'),
+			'--timeframe', config.get<string>('forecast.timeframe', '1d'),
+			'--bars', String(config.get<number>('forecast.bars', 1000)),
+			'--horizon', String(config.get<number>('forecast.horizon', 20)),
+			'--model', model,
+		];
+		const context = config.get<string>('forecast.context', '').trim();
+		if (model === 'flows') {
+			if (!context) {
+				throw new Error(vscode.l10n.t('Set "quant.forecast.context" before using the flows model.'));
+			}
+			args.push('--context', context);
+		}
+		this._log.info(`Forecasting: ${python} ${args.join(' ')}`);
+		const payload = await this._run(python, args, projectRoot, token);
+		if (!payload.ok) {
+			throw new Error(payload.error ?? vscode.l10n.t('The engine reported no forecast.'));
+		}
+		return payload as ForecastPayload;
+	}
+
+	/** Appends outcomes for every configured-market forecast whose full horizon has matured. */
+	async resolveForecasts(token?: vscode.CancellationToken): Promise<ForecastResolution> {
+		const { python, projectRoot } = this._resolvePaths();
+		const config = vscode.workspace.getConfiguration('quant');
+		const args = [
+			'-m', 'quant.cli', 'forecast-resolve',
+			'--product', config.get<string>('forecast.product', 'BTC-USD'),
+			'--timeframe', config.get<string>('forecast.timeframe', '1d'),
+			'--bars', String(config.get<number>('forecast.resolveBars', 5000)),
+		];
+		const payload = await this._run(python, args, projectRoot, token);
+		if (!payload.ok) {
+			throw new Error(payload.error ?? vscode.l10n.t('Forecast outcomes could not be resolved.'));
+		}
+		return payload as ForecastResolution;
+	}
+
+	async forecastReport(token?: vscode.CancellationToken): Promise<ForecastReport> {
+		return this._forecastRegistryCommand<ForecastReport>('forecast-report', token);
+	}
+
+	async auditForecasts(token?: vscode.CancellationToken): Promise<ForecastAudit> {
+		return this._forecastRegistryCommand<ForecastAudit>('forecast-audit', token);
+	}
+
+	private async _forecastRegistryCommand<T extends Response>(command: string,
+		token?: vscode.CancellationToken): Promise<T> {
+		const { python, projectRoot } = this._resolvePaths();
+		const payload = await this._run(
+			python, ['-m', 'quant.cli', command], projectRoot, token);
+		if (!payload.ok) {
+			throw new Error(payload.error ?? vscode.l10n.t('The forecast registry command failed.'));
+		}
+		return payload as T;
+	}
 
 	/**
 	 * Evaluates the strategy in `document`.
