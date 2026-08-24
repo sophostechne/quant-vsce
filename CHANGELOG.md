@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.4
+
+- Add point-in-time market forecasts from the quant engine, including baseline, cycle, pattern,
+  and cross-market flow models.
+- Record forecasts append-only, resolve matured outcomes, report calibration and performance by
+  immutable model version, and audit registry chronology and links.
+- Preserve the current visualizer workflow while sharing one engine runner across strategy and
+  forecast commands.
+
 ## 1.1.1
 
 - A new chart opens on daily bars. It opened on 1-minute bars, which published history does not
