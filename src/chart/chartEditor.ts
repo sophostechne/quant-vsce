@@ -127,6 +127,8 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 
 		const disposables: vscode.Disposable[] = [];
 		let model = parseModel(document, this._log);
+		let historyRequest = 0;
+		let visualizerRequest = 0;
 
 		activePanels.set(document.uri.toString(), webviewPanel);
 		if (webviewPanel.active) {
@@ -164,30 +166,44 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		};
 
 		const pushHistory = async () => {
+			const request = ++historyRequest;
+			// Invalidate overlays as soon as a different series is requested. Otherwise a slow
+			// visualizer for the old symbol can arrive while the new history request is in flight.
+			visualizerRequest++;
+			const requestedModel = model;
 			// Provenance travels with the bars, and comes from whatever actually served them
 			// rather than from connection state: with no daemon, published history and the
 			// simulator are both reachable, and only the fetch knows which one answered.
 			let source: BarProvenance = this._client.state === ConnectionState.Simulated ? 'simulated' : 'live';
 			try {
-				const result = await this._client.history(model.symbol, model.timeframe, model.bars);
+				const result = await this._client.history(
+					requestedModel.symbol, requestedModel.timeframe, requestedModel.bars);
+				// Symbol changes and connection changes can overlap. Only the newest request may
+				// replace the canvas; a late AAPL response must never overwrite a newer MSFT chart.
+				if (request !== historyRequest) {
+					return;
+				}
 				source = result.source;
 				void webviewPanel.webview.postMessage({
-					type: 'history', symbol: model.symbol, bars: result.bars, source,
-					token: barsToken(result.bars),
+					type: 'history', symbol: requestedModel.symbol, bars: result.bars, source,
+					token: barsToken(result.bars, requestedModel),
 					...(result.venue ? { venue: result.venue } : {}),
 					// A source that answered and had nothing says so on the chart, rather than
 					// leaving "no data" to be read as a fault.
 					...(result.reason ? { error: result.reason } : {})
 				});
-				await pushVisualizers(result.bars);
+				await pushVisualizers(result.bars, requestedModel);
 			} catch (error) {
-				this._log.error(`History for ${model.symbol} failed`, error);
+				if (request !== historyRequest) {
+					return;
+				}
+				this._log.error(`History for ${requestedModel.symbol} failed`, error);
 				// Send an empty series so the chart discards whatever it was showing. Keeping
 				// stale bars on screen under a new label is how synthetic prices end up
 				// captioned as live.
 				void webviewPanel.webview.postMessage({
 					type: 'history',
-					symbol: model.symbol,
+					symbol: requestedModel.symbol,
 					bars: [],
 					source,
 					error: error instanceof Error ? error.message : 'History request failed.'
@@ -210,25 +226,35 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 		 * every history message means a redraw of unchanged bars keeps what is already on screen
 		 * rather than blanking it and drawing it again a worker later.
 		 */
-		const barsToken = (bars: readonly Bar[]) =>
-			`${model.symbol}|${model.timeframe}|${bars.length}|${bars[bars.length - 1]?.time ?? 0}`;
+		const barsToken = (bars: readonly Bar[], chart: ChartDocumentModel) =>
+			`${chart.symbol}|${chart.timeframe}|${bars.length}|${bars[bars.length - 1]?.time ?? 0}`;
 
-		const pushVisualizers = async (bars: readonly Bar[]) => {
-			const token = barsToken(bars);
-			const paths = model.visualizers ?? [];
+		const pushVisualizers = async (bars: readonly Bar[], chart: ChartDocumentModel) => {
+			const request = ++visualizerRequest;
+			const token = barsToken(bars, chart);
+			const paths = chart.visualizers ?? [];
+			const stillCurrent = () => request === visualizerRequest
+				&& chart.symbol === model.symbol
+				&& chart.timeframe === model.timeframe
+				&& JSON.stringify(chart.visualizers) === JSON.stringify(model.visualizers);
 			if (paths.length === 0 || bars.length === 0) {
-				void webviewPanel.webview.postMessage({ type: 'visualizers', token, series: [], background: [], markers: [] });
+				if (stillCurrent()) {
+					void webviewPanel.webview.postMessage({ type: 'visualizers', token, series: [], background: [], markers: [] });
+				}
 				return;
 			}
 			const output = await this._visualizers.run(
-				paths, bars, VisualizerRegistry.context(model.symbol, model.timeframe));
-			void webviewPanel.webview.postMessage({ type: 'visualizers', token, ...output });
+				paths, bars, VisualizerRegistry.context(chart.symbol, chart.timeframe));
+			if (stillCurrent()) {
+				void webviewPanel.webview.postMessage({ type: 'visualizers', token, ...output });
+			}
 		};
 
 		// A visualizer file changed on disk. Only the drawn lines are stale, so the bars stay.
 		disposables.push(this._visualizers.onDidChange(() => {
-			void this._client.history(model.symbol, model.timeframe, model.bars)
-				.then(result => pushVisualizers(result.bars))
+			const requestedModel = model;
+			void this._client.history(requestedModel.symbol, requestedModel.timeframe, requestedModel.bars)
+				.then(result => pushVisualizers(result.bars, requestedModel))
 				.catch(() => { /* the history path reports its own failures */ });
 		}));
 

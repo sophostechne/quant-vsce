@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.4
+
+- Rapid symbol, timeframe and feed changes no longer allow an older history or visualizer
+  response to replace the newer chart.
+- Double-clicking a study divider restores pane heights without also resetting horizontal zoom.
+
 ## 1.10.3
 
 - No functional changes. The extension is republished from the same source as 1.10.2;

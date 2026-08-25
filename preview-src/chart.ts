@@ -1803,15 +1803,16 @@ canvas.addEventListener('mouseleave', () => {
 	requestRepaint();
 });
 
-/** Double click restores the full series and resumes following. */
+/** Double click restores either the grabbed pane split or the full horizontal series. */
 canvas.addEventListener('dblclick', () => {
-	viewSize = bars.length;
-	following = true;
-	clampView();
 	if (dividerAt(pointer?.y ?? -1) !== undefined) {
 		// Double-clicking a boundary restores the even split rather than resetting the zoom.
 		paneFractions = [];
 		vscode.postMessage({ type: 'setPaneHeights', paneHeights: [] });
+	} else {
+		viewSize = bars.length;
+		following = true;
+		clampView();
 	}
 	requestRepaint();
 });
