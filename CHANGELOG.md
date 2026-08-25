@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.3
+
+- No functional changes. The extension is republished from the same source as 1.10.2;
+  the version number is the only difference between the two builds.
+
 ## 1.10.2
 
 - Hollow candles no longer have a line down the middle of them. The wick was drawn as one stroke

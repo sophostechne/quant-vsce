@@ -2,7 +2,7 @@
 	"name": "quant-workbench",
 	"displayName": "%displayName%",
 	"description": "%description%",
-	"version": "1.10.2",
+	"version": "1.10.3",
 	"publisher": "sophostechne",
 	"license": "MIT",
 	"repository": {
@@ -392,7 +392,14 @@
 				"quant.forecast.timeframe": {
 					"type": "string",
 					"default": "1d",
-					"enum": ["1m", "5m", "15m", "1h", "6h", "1d"],
+					"enum": [
+						"1m",
+						"5m",
+						"15m",
+						"1h",
+						"6h",
+						"1d"
+					],
 					"description": "%config.forecast.timeframe%"
 				},
 				"quant.forecast.bars": {
@@ -419,7 +426,12 @@
 				"quant.forecast.model": {
 					"type": "string",
 					"default": "patterns",
-					"enum": ["baseline", "cycles", "patterns", "flows"],
+					"enum": [
+						"baseline",
+						"cycles",
+						"patterns",
+						"flows"
+					],
 					"description": "%config.forecast.model%"
 				},
 				"quant.forecast.context": {
