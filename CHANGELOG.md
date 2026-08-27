@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.6
+
+- A visualizer's marker label is centred on its capitals rather than on the font's em box, which
+  reserves the room a descender would need and left a label of capitals sitting high in the chip
+  behind it. The chip has rounded corners.
+
 ## 1.10.5
 
 - A visualizer's marker label sits in the middle of the chip drawn behind it. The chip was
