@@ -39,6 +39,10 @@ export function registerIndicatorCommands(log: Logger): vscode.Disposable {
 	return vscode.Disposable.from(
 		vscode.commands.registerCommand('quant.addIndicator', () => addIndicator(log)),
 		vscode.commands.registerCommand('quant.removeIndicator', () => removeIndicator(log)),
+		// Not contributed to the palette: it takes the chart and the indicator to edit, which is
+		// something only the chart's own legend knows.
+		vscode.commands.registerCommand('quant.chart.editIndicator',
+			(uri: vscode.Uri, index: number) => editIndicator(uri, index, log)),
 		vscode.commands.registerCommand('quant.setChartStyle', () => setChartStyle(log)),
 		vscode.commands.registerCommand('quant.setChartScale', () => setChartScale(log)),
 		vscode.commands.registerCommand('quant.draw', () => armDrawingTool()),
@@ -97,8 +101,8 @@ async function armDrawingTool(): Promise<void> {
 	}
 }
 
-/** Colours offered for a drawing, resolved against the theme when painted. */
-const DRAWING_COLORS = [
+/** Colours offered for a drawing or an indicator, resolved against the theme when painted. */
+const THEME_COLORS = [
 	{ label: 'Default', value: undefined },
 	{ label: 'Blue', value: 'charts.blue' },
 	{ label: 'Green', value: 'charts.green' },
@@ -152,7 +156,7 @@ async function editDrawing(log: Logger): Promise<void> {
 			break;
 		}
 		case 'color': {
-			const picked = await vscode.window.showQuickPick(DRAWING_COLORS, { title: vscode.l10n.t('Colour') });
+			const picked = await vscode.window.showQuickPick(THEME_COLORS, { title: vscode.l10n.t('Colour') });
 			if (!picked) {
 				return;
 			}
@@ -288,6 +292,57 @@ async function addIndicator(log: Logger): Promise<void> {
 	const model = parseModel(document, log);
 	await writeModel(document, { ...model, indicators: [...model.indicators, spec] });
 	log.info(`Added indicator ${describeIndicator(spec)} to ${document.uri.fsPath}`);
+}
+
+/**
+ * Settings for one indicator, addressed by where it sits in the document.
+ *
+ * The chart says which one, so this asks only what the settings are - a quick pick naming them
+ * again would be a list in front of a control the user has already pointed at. Cancelling any
+ * prompt leaves the indicator as it was, rather than saving the answers given so far and
+ * abandoning the rest: half a setting is not a setting.
+ */
+async function editIndicator(uri: vscode.Uri, index: number, log: Logger): Promise<void> {
+	const document = await vscode.workspace.openTextDocument(uri);
+	const model = parseModel(document, log);
+	const spec = model.indicators[index];
+	if (!spec) {
+		return;
+	}
+
+	const next: IndicatorSpec = { ...spec };
+	const title = describeIndicator(spec);
+	for (const parameter of CHOICES.find(choice => choice.type === spec.type)?.parameters ?? []) {
+		const entered = await vscode.window.showInputBox({
+			title: `${title} — ${parameter.prompt}`,
+			value: String(next[parameter.key] ?? parameter.value),
+			validateInput: text => {
+				const parsed = Number(text);
+				return Number.isFinite(parsed) && parsed > 0
+					? undefined
+					: vscode.l10n.t('Enter a positive number.');
+			},
+		});
+		if (entered === undefined) {
+			return;
+		}
+		next[parameter.key] = Number(entered);
+	}
+
+	const picked = await vscode.window.showQuickPick(
+		THEME_COLORS.map(entry => ({ ...entry, picked: entry.value === spec.color })),
+		{ title: `${title} — ${vscode.l10n.t('Colour')}` },
+	);
+	if (!picked) {
+		return;
+	}
+	next.color = picked.value;
+
+	await writeModel(document, {
+		...model,
+		indicators: model.indicators.map((entry, i) => i === index ? next : entry),
+	});
+	log.info(`Edited indicator ${describeIndicator(next)} on ${document.uri.fsPath}`);
 }
 
 async function removeIndicator(log: Logger): Promise<void> {

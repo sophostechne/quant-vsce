@@ -283,8 +283,51 @@ body {
 }
 
 .legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
 	font-variant-numeric: tabular-nums;
 	font-size: 0.9em;
+}
+
+.legend-item.off .legend-label {
+	opacity: 0.55;
+	text-decoration: line-through;
+}
+
+.legend-action {
+	display: inline-flex;
+	padding: 0;
+	border: none;
+	border-radius: 3px;
+	background: none;
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
+	cursor: pointer;
+	/* Space is held whether or not the controls are showing, so entries do not reflow - and */
+	/* their neighbours do not move out from under the pointer - as the pointer crosses them. */
+	opacity: 0;
+}
+
+/* A hidden indicator keeps its eye up: that button is the only way back to it. */
+.legend-item.off .legend-action.eye {
+	opacity: 0.6;
+}
+
+.legend-item:hover .legend-action,
+.legend-item.off:hover .legend-action.eye,
+.legend-action:focus-visible {
+	opacity: 1;
+}
+
+.legend-action:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-foreground);
+	opacity: 1;
+}
+
+.legend-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
 }
 
 #canvas.resizing {

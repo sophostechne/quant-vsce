@@ -258,7 +258,7 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 				.catch(() => { /* the history path reports its own failures */ });
 		}));
 
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; interval?: string; paneHeights?: number[]; drawings?: Drawing[]; index?: number }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; symbol?: string; timeframe?: Timeframe; interval?: string; paneHeights?: number[]; drawings?: Drawing[]; index?: number; hidden?: boolean }) => {
 			switch (message.type) {
 				case 'ready':
 					pushConfig();
@@ -286,6 +286,44 @@ export class ChartEditorProvider implements vscode.CustomTextEditorProvider {
 						await writeModel(document, { ...model, paneHeights: message.paneHeights });
 					}
 					break;
+
+				// The legend's controls, which address an indicator by its position in the
+				// document. Each writes the document rather than holding state in the chart, so
+				// hiding one is undoable and shows up in a diff like any other edit to it.
+				case 'setIndicatorHidden': {
+					const index = message.index;
+					if (typeof index === 'number' && model.indicators[index]) {
+						const indicators = model.indicators.map((spec, i) => i === index
+							// Cleared rather than written as false: showing an indicator should
+							// leave the file as it was before it was ever hidden.
+							? { ...spec, hidden: message.hidden === true ? true : undefined }
+							: spec);
+						await writeModel(document, { ...model, indicators });
+					}
+					break;
+				}
+
+				case 'removeIndicator': {
+					const index = message.index;
+					if (typeof index === 'number' && model.indicators[index]) {
+						await writeModel(document, {
+							...model,
+							indicators: model.indicators.filter((_, i) => i !== index),
+						});
+					}
+					break;
+				}
+
+				case 'editIndicator': {
+					if (typeof message.index === 'number' && model.indicators[message.index]) {
+						// Through a command rather than a direct call: the prompts live with the
+						// other indicator commands, and reaching them from here would make the
+						// editor and those commands import each other.
+						await vscode.commands.executeCommand(
+							'quant.chart.editIndicator', document.uri, message.index);
+					}
+					break;
+				}
 
 				// Custom intervals are a setting rather than part of the document: they are a
 				// property of how someone works, not of the chart they are looking at, and one

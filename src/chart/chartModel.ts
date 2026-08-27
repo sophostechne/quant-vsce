@@ -23,6 +23,14 @@ export interface IndicatorSpec {
 	slow?: number;
 	signal?: number;
 	color?: string;
+	/**
+	 * Kept by the chart but not drawn.
+	 *
+	 * A hidden indicator stays in the document, and in the legend where its eye is how it comes
+	 * back: hiding is a way of looking at a chart rather than a way of editing one, and an
+	 * indicator that vanished from both would only be removable by having been removed.
+	 */
+	hidden?: boolean;
 }
 
 /** Per-bar renderings share the time axis; the last four replace the series. */
@@ -130,6 +138,11 @@ function parseIndicators(value: unknown, log: Logger): IndicatorSpec[] {
 		}
 		if (typeof candidate.color === 'string') {
 			spec.color = candidate.color;
+		}
+		// Written only when true, so hiding and showing an indicator leaves the document as it
+		// was rather than accumulating `"hidden": false` on everything ever toggled.
+		if (candidate.hidden === true) {
+			spec.hidden = true;
 		}
 		parsed.push(spec);
 	}

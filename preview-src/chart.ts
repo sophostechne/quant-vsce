@@ -158,24 +158,101 @@ function themeColor(styles: CSSStyleDeclaration, color: string): string {
 function renderLegend(atIndex?: number): void {
 	legendLabel.replaceChildren();
 	for (const series of indicatorSeries) {
-		const chip = document.createElement('span');
-		chip.className = 'legend-item';
-		let text = series.label;
-		if (atIndex !== undefined) {
-			const values = series.lines
-				.map(line => line[atIndex])
-				.filter((value): value is number => value !== undefined)
-				.map(value => formatValue(value));
-			if (values.length > 0) {
-				text += ` ${values.join('/')}`;
-			}
-		}
-		chip.textContent = text;
-		chip.style.color = THEME_COLOR_ID.test(series.color)
-			? `var(--vscode-${series.color.replace('.', '-')})`
-			: series.color;
-		legendLabel.appendChild(chip);
+		legendLabel.appendChild(legendItem(series, atIndex));
 	}
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const EYE = [
+	'M0.8 6c1.7-2.4 3.4-3.6 5.2-3.6S9.5 3.6 11.2 6c-1.7 2.4-3.4 3.6-5.2 3.6S2.5 8.4 0.8 6z',
+	'M6 4.6a1.4 1.4 0 100 2.8 1.4 1.4 0 000-2.8z',
+];
+const EYE_OFF = [...EYE, 'M2 10L10 2'];
+const SLIDERS = ['M1.5 4h9', 'M1.5 8h9', 'M4 2.5v3', 'M8 6.5v3'];
+const CROSS = ['M3 3l6 6', 'M9 3l-6 6'];
+
+/**
+ * One legend entry, with the controls for the indicator behind it.
+ *
+ * Offered only for the built-in indicators, because those are entries in the document this chart
+ * writes - which is what makes hiding and removing undoable, savable and visible in a diff. A
+ * visualizer's series comes from a file on disk instead, and a button here that edited it would
+ * be editing something the chart does not own.
+ */
+function legendItem(series: IndicatorSeries, atIndex: number | undefined): HTMLElement {
+	const item = document.createElement('span');
+	item.className = 'legend-item';
+
+	const label = document.createElement('span');
+	label.className = 'legend-label';
+	label.style.color = THEME_COLOR_ID.test(series.color)
+		? `var(--vscode-${series.color.replace('.', '-')})`
+		: series.color;
+
+	let text = series.label;
+	// No value beside a hidden indicator: the line it would be read off is not on the chart, and
+	// a number pointing at nothing is a number nobody can check.
+	if (atIndex !== undefined && !series.hidden) {
+		const values = series.lines
+			.map(line => line[atIndex])
+			.filter((value): value is number => value !== undefined)
+			.map(value => formatValue(value));
+		if (values.length > 0) {
+			text += ` ${values.join('/')}`;
+		}
+	}
+	label.textContent = text;
+	item.appendChild(label);
+
+	const index = series.specIndex;
+	if (index === undefined) {
+		return item;
+	}
+
+	const hidden = series.hidden === true;
+	item.classList.toggle('off', hidden);
+	const eye = legendAction(hidden ? 'Show' : 'Hide', hidden ? EYE_OFF : EYE,
+		() => vscode.postMessage({ type: 'setIndicatorHidden', index, hidden: !hidden }));
+	// Marked, because a hidden indicator shows this one control at all times: the rest appear on
+	// hover, and an entry whose only way back was invisible would be a row of dimmed text.
+	eye.classList.add('eye');
+	item.appendChild(eye);
+	item.appendChild(legendAction('Settings', SLIDERS,
+		() => vscode.postMessage({ type: 'editIndicator', index })));
+	item.appendChild(legendAction('Remove', CROSS,
+		() => vscode.postMessage({ type: 'removeIndicator', index })));
+	return item;
+}
+
+/** Buttons rather than clickable spans, so the controls are reachable from the keyboard too. */
+function legendAction(label: string, paths: readonly string[], onClick: () => void): HTMLButtonElement {
+	const button = document.createElement('button');
+	button.type = 'button';
+	button.className = 'legend-action';
+	button.title = label;
+	button.setAttribute('aria-label', label);
+	button.appendChild(icon(paths));
+	button.addEventListener('click', onClick);
+	return button;
+}
+
+/** Stroked outlines rather than filled glyphs: they stay legible at 12px in either theme. */
+function icon(paths: readonly string[]): SVGElement {
+	const svg = document.createElementNS(SVG_NS, 'svg');
+	svg.setAttribute('viewBox', '0 0 12 12');
+	svg.setAttribute('width', '12');
+	svg.setAttribute('height', '12');
+	svg.setAttribute('aria-hidden', 'true');
+	for (const d of paths) {
+		const path = document.createElementNS(SVG_NS, 'path');
+		path.setAttribute('d', d);
+		path.setAttribute('fill', 'none');
+		path.setAttribute('stroke', 'currentColor');
+		path.setAttribute('stroke-width', '1');
+		path.setAttribute('stroke-linecap', 'round');
+		svg.appendChild(path);
+	}
+	return svg;
 }
 
 // -- Viewport --------------------------------------------------------------------------
@@ -209,6 +286,14 @@ let slotWidth = 1;
 let paneFractions: number[] = [];
 /** Boundaries from the last paint, so hit-testing matches what is on screen. */
 let dividerYs: number[] = [];
+/**
+ * Which study each drawn divider belongs to, as an index into the full study list.
+ *
+ * Fractions are held per study including the hidden ones, so hiding a study and showing it again
+ * gives back the height it had rather than the height of whatever moved up into its slot. Panes
+ * and dividers exist only for the studies actually drawn, so the two are not the same index.
+ */
+let dividerStudyIndices: number[] = [];
 let dividerDrag: { index: number; startY: number; before: number[] } | undefined;
 
 // -- Drawings --------------------------------------------------------------------------
@@ -371,14 +456,22 @@ function dividerAt(y: number): number | undefined {
  * for the topmost divider the pane above is the price pane, which simply absorbs whatever the
  * studies do not take.
  */
-function dragDivider(index: number, dy: number, plotHeight: number, before: readonly number[]): void {
+function dragDivider(divider: number, dy: number, plotHeight: number, before: readonly number[]): void {
 	if (plotHeight <= 0) {
+		return;
+	}
+	// A divider is numbered among the ones on screen; the fractions it moves are numbered among
+	// every study, hidden ones included, so which slots it touches is looked up rather than
+	// counted.
+	const belowIndex = dividerStudyIndices[divider];
+	const aboveIndex = divider > 0 ? dividerStudyIndices[divider - 1] : undefined;
+	if (belowIndex === undefined) {
 		return;
 	}
 	const delta = dy / plotHeight;
 	const next = [...before];
 
-	const below = next[index];
+	const below = next[belowIndex];
 	if (below === undefined) {
 		return;
 	}
@@ -387,21 +480,23 @@ function dragDivider(index: number, dy: number, plotHeight: number, before: read
 		return;
 	}
 
-	if (index > 0) {
-		const above = next[index - 1]!;
+	if (aboveIndex !== undefined) {
+		const above = next[aboveIndex]!;
 		const grown = above + delta;
 		if (grown < MIN_STUDY_FRACTION) {
 			return;
 		}
-		next[index - 1] = grown;
+		next[aboveIndex] = grown;
 	} else {
-		// Price pane absorbs the change; refuse if it would fall below its floor.
-		const studiesTotal = next.reduce((sum, value) => sum + value, 0) - below + shrunk;
+		// Price pane absorbs the change; refuse if it would fall below its floor. A hidden study
+		// takes no height, so it is not part of what the candles are competing with here.
+		const drawn = new Set(dividerStudyIndices);
+		const studiesTotal = next.reduce((sum, value, i) => drawn.has(i) ? sum + value : sum, 0) - below + shrunk;
 		if (1 - studiesTotal < MIN_PRICE_FRACTION) {
 			return;
 		}
 	}
-	next[index] = shrunk;
+	next[belowIndex] = shrunk;
 	paneFractions = next;
 }
 
@@ -673,14 +768,19 @@ interface Pane {
  */
 function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	const studies = indicatorSeries.filter(series => !series.overlay);
-	const overlays = indicatorSeries.filter(series => series.overlay);
+	const overlays = indicatorSeries.filter(series => series.overlay && !series.hidden);
 
 	const fractions = resolvedFractions(studies.length);
 	const studyHeights = fractions.map(fraction => plotHeight * fraction);
-	const priceHeight = plotHeight - studyHeights.reduce((sum, value) => sum + value, 0);
+	// Only the studies on screen take height from the candles. A hidden one keeps its slot in the
+	// fractions - so it comes back the size it was - while the price pane holds its height in the
+	// meantime.
+	const priceHeight = plotHeight - studies.reduce(
+		(sum, series, i) => series.hidden ? sum : sum + studyHeights[i]!, 0);
 
 	const panes: Pane[] = [];
 	dividerYs = [];
+	dividerStudyIndices = [];
 
 	// Price pane: scaled to the visible candles and any overlay running through them, so a
 	// band that pushes outside the price range is not clipped.
@@ -739,8 +839,12 @@ function layoutPanes(visible: readonly Bar[], plotHeight: number): Pane[] {
 	let top = PAD_TOP + priceHeight;
 	for (let i = 0; i < studies.length; i++) {
 		const series = studies[i]!;
+		if (series.hidden) {
+			continue;
+		}
 		const bounds = series.range ?? visibleBounds(series);
 		dividerYs.push(top);
+		dividerStudyIndices.push(i);
 		panes.push(makePane(top, studyHeights[i]!, bounds.min, bounds.max, [series], false));
 		top += studyHeights[i]!;
 	}

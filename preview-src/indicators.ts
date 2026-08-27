@@ -33,6 +33,8 @@ export interface IndicatorSpec {
 	readonly signal?: number;
 	/** A `charts.*` colour token, resolved against the theme at draw time. */
 	readonly color?: string;
+	/** Computed and listed in the legend, but not drawn. */
+	readonly hidden?: boolean;
 }
 
 /** A value per bar, index-aligned with the source series. `undefined` where undefined. */
@@ -54,6 +56,16 @@ export interface IndicatorSeries {
 	readonly histogram?: Line;
 	/** Colour histogram columns by bar direction rather than the series colour. */
 	readonly histogramByBar?: boolean;
+	/**
+	 * Where the indicator this came from sits in the document, so the legend's controls act on
+	 * the right one. A spec that computes to nothing is dropped, so a series' position among the
+	 * drawn ones is not its position in the document.
+	 *
+	 * Absent on a visualizer's series, which no chart control can edit: it comes from a file.
+	 */
+	readonly specIndex?: number;
+	/** Listed in the legend, kept out of the panes. */
+	readonly hidden?: boolean;
 }
 
 const DEFAULT_COLORS = ['charts.blue', 'charts.yellow', 'charts.purple', 'charts.orange'];
@@ -221,7 +233,19 @@ export function stochastic(bars: readonly Bar[], period: number): { k: Line; d: 
 
 // -- Assembly ----------------------------------------------------------------------------
 
+/**
+ * One indicator's series, tagged with where it came from and whether it is drawn.
+ *
+ * Hidden indicators are computed rather than skipped. The saving would be real but small, and
+ * the legend still has to name one - with its colour - for the eye that brings it back to be
+ * something you can find.
+ */
 export function computeIndicator(spec: IndicatorSpec, bars: readonly Bar[], index: number): IndicatorSeries | undefined {
+	const series = buildIndicator(spec, bars, index);
+	return series && { ...series, specIndex: index, hidden: spec.hidden === true };
+}
+
+function buildIndicator(spec: IndicatorSpec, bars: readonly Bar[], index: number): IndicatorSeries | undefined {
 	const color = spec.color ?? DEFAULT_COLORS[index % DEFAULT_COLORS.length]!;
 	const closes = bars.map(bar => bar.close);
 	const period = Math.max(2, Math.floor(spec.period ?? defaultPeriod(spec.type)));
