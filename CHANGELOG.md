@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.5
+
+- A visualizer's marker label sits in the middle of the chip drawn behind it. The chip was
+  positioned around one text baseline and the label drawn on another - whichever the previous
+  drawing pass had left set - so the text rode high in its own background.
+
 ## 1.10.4
 
 - Rapid symbol, timeframe and feed changes no longer allow an older history or visualizer
