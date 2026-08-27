@@ -963,6 +963,7 @@ function drawVisualizerBackground(slot: number, plotWidth: number, top: number, 
 /** Chip geometry for a marker label: 10px text needs 13px of chip not to touch its edges. */
 const CHIP_HEIGHT = 13;
 const CHIP_PAD_X = 4;
+const CHIP_RADIUS = 3;
 /** Pixels between the chip and the high or low it is pinned to. */
 const CHIP_GAP = 3;
 
@@ -982,10 +983,15 @@ function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pan
 	context.save();
 	context.font = '10px var(--vscode-font-family)';
 	context.textAlign = 'center';
-	// Both axes centred on the chip's own middle, so the label sits in it rather than resting on
-	// a baseline the chip was sized around. Drawing from the chip outwards also keeps the gap to
-	// the bar fixed: with a baseline the clearance moved with the font's descent.
-	context.textBaseline = 'middle';
+	context.textBaseline = 'alphabetic';
+	// Centred on the capitals, not on the em box and not on the label's own ink. The em box - what
+	// a 'middle' baseline centres - reserves the room a descender would need, so a label without
+	// one rides high in the chip by half that descent. The label's own ink centres perfectly but
+	// moves with whichever glyphs it happens to contain, which would leave two chips on the same
+	// chart sitting at different heights. One reference measurement holds every chip to the same
+	// line.
+	const capHeight = context.measureText('H').actualBoundingBoxAscent;
+	const baseline = (CHIP_HEIGHT + capHeight) / 2;
 
 	for (const marker of visualizerMarkers) {
 		const i = marker.index - viewOffset;
@@ -1005,10 +1011,12 @@ function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pan
 		// it matters - at a turn, which is busy.
 		context.fillStyle = color;
 		context.globalAlpha = 0.85;
-		context.fillRect(x - width / 2 - CHIP_PAD_X, top, width + CHIP_PAD_X * 2, CHIP_HEIGHT);
+		context.beginPath();
+		context.roundRect(x - width / 2 - CHIP_PAD_X, top, width + CHIP_PAD_X * 2, CHIP_HEIGHT, CHIP_RADIUS);
+		context.fill();
 		context.globalAlpha = 1;
 		context.fillStyle = styles.getPropertyValue('--vscode-editor-background').trim() || '#1e1e1e';
-		context.fillText(marker.text, x, top + CHIP_HEIGHT / 2);
+		context.fillText(marker.text, x, top + baseline);
 	}
 	context.restore();
 }
