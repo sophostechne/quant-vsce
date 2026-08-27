@@ -960,6 +960,12 @@ function drawVisualizerBackground(slot: number, plotWidth: number, top: number, 
 	}
 }
 
+/** Chip geometry for a marker label: 10px text needs 13px of chip not to touch its edges. */
+const CHIP_HEIGHT = 13;
+const CHIP_PAD_X = 4;
+/** Pixels between the chip and the high or low it is pinned to. */
+const CHIP_GAP = 3;
+
 /**
  * Notes pinned to bars.
  *
@@ -976,6 +982,10 @@ function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pan
 	context.save();
 	context.font = '10px var(--vscode-font-family)';
 	context.textAlign = 'center';
+	// Both axes centred on the chip's own middle, so the label sits in it rather than resting on
+	// a baseline the chip was sized around. Drawing from the chip outwards also keeps the gap to
+	// the bar fixed: with a baseline the clearance moved with the font's descent.
+	context.textBaseline = 'middle';
 
 	for (const marker of visualizerMarkers) {
 		const i = marker.index - viewOffset;
@@ -985,7 +995,9 @@ function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pan
 		drawn.add(i);
 		const bar = visible[i]!;
 		const x = i * slot + slot / 2;
-		const y = marker.above ? price.toY(bar.high) - 6 : price.toY(bar.low) + 14;
+		const top = marker.above
+			? price.toY(bar.high) - CHIP_GAP - CHIP_HEIGHT
+			: price.toY(bar.low) + CHIP_GAP;
 
 		const color = marker.color ? themeColor(styles, marker.color) : textColor;
 		const width = context.measureText(marker.text).width;
@@ -993,10 +1005,10 @@ function drawVisualizerMarkers(visible: readonly Bar[], slot: number, price: Pan
 		// it matters - at a turn, which is busy.
 		context.fillStyle = color;
 		context.globalAlpha = 0.85;
-		context.fillRect(x - width / 2 - 4, y - 10, width + 8, 13);
+		context.fillRect(x - width / 2 - CHIP_PAD_X, top, width + CHIP_PAD_X * 2, CHIP_HEIGHT);
 		context.globalAlpha = 1;
 		context.fillStyle = styles.getPropertyValue('--vscode-editor-background').trim() || '#1e1e1e';
-		context.fillText(marker.text, x, y);
+		context.fillText(marker.text, x, top + CHIP_HEIGHT / 2);
 	}
 	context.restore();
 }
