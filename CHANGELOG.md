@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.0
+
+- Indicators are hidden, configured and removed from their own legend entry. Hovering one shows
+  an eye, a settings button and a remove button: the eye keeps an indicator in the chart without
+  drawing it, and its entry stays in the legend, struck through, because that eye is the way
+  back. Settings re-prompts that indicator's own parameters and colour with the current values
+  filled in. All three write the `.chart` document, so each is undoable and shows up in a diff.
+- A hidden study keeps its share of the pane heights, and the price pane holds that height while
+  it is away, so showing it again gives back the pane it had rather than one belonging to a
+  study that had moved up into its place.
+
 ## 1.10.6
 
 - A visualizer's marker label is centred on its capitals rather than on the font's em box, which
